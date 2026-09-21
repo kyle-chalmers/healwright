@@ -1,0 +1,117 @@
+# healwright classification patterns.
+#
+# Two stages, first match wins:
+#   Stage 1: structured termination codes from the platform (fast, reliable).
+#   Stage 2: ordered regex over  state_message + error_message + stripped traceback.
+#
+# Category order is load-bearing. CONFIG_ERROR runs before CODE_BUG because git-checkout
+# failures contain "auth"/"credential" words that would otherwise match auth_error and send a
+# workspace problem into the AI fix pipeline. UPSTREAM_DATA runs before CODE_BUG because a
+# partner file that has not arrived yet surfaces as FileNotFoundError, which no code fix helps.
+#
+# Add patterns here, not in code. Keep them generic: vendor names for infrastructure are fine
+# (that is what an error says), organisation- or domain-specific phrases are not.
+version: 1
+
+order: [TRANSIENT, UPSTREAM_DATA, CONFIG_ERROR, CODE_BUG]
+
+# Result states the platform reports that map straight to a category (Stage 1).
+result_states:
+  TIMEDOUT: TRANSIENT
+
+termination_codes:
+  TRANSIENT:
+    - AWS_INSUFFICIENT_FREE_ADDRESSES_IN_SUBNET_FAILURE
+    - AWS_INSUFFICIENT_INSTANCE_CAPACITY_FAILURE
+    - AWS_RESOURCE_QUOTA_EXCEEDED
+    - AZURE_QUOTA_EXCEEDED_EXCEPTION
+    - GCP_QUOTA_EXCEEDED
+    - CLOUD_PROVIDER_LAUNCH_FAILURE
+    - CLOUD_PROVIDER_RESOURCE_STOCKOUT
+    - COMMUNICATION_LOST
+    - INSTANCE_POOL_MAX_CAPACITY_REACHED
+    - REQUEST_THROTTLED
+    - SPOT_INSTANCE_TERMINATION
+    - DRIVER_UNREACHABLE
+  CONFIG_ERROR:
+    - BOOTSTRAP_TIMEOUT_DUE_TO_MISCONFIG
+    - DOCKER_IMAGE_PULL_FAILURE
+    - INVALID_ARGUMENT
+    - NETWORK_CONFIGURATION_FAILURE
+    - WORKSPACE_CONFIGURATION_ERROR
+    - INSTANCE_PROFILE_NOT_FOUND
+    - INIT_SCRIPT_FAILURE
+  CODE_BUG:
+    - EOS_SPARK_IMAGE
+    - SPARK_STARTUP_FAILURE
+
+patterns:
+  TRANSIENT:
+    - name: warehouse_timeout
+      regex: "(?i)(snowflake|redshift|bigquery|warehouse|database).{0,40}?time(d)?\\s*out"
+    - name: connection_error
+      regex: "(?i)connection\\s+(refused|reset|timed?\\s*out|aborted)"
+    - name: rate_limit
+      regex: "(?i)too many requests|rate.?limit|throttl"
+    - name: spot_termination
+      regex: "(?i)spot.*(termina|interrupt|reclaim)"
+    - name: cloud_failure
+      regex: "(?i)cloud.?provider.*fail"
+    - name: cluster_termination
+      regex: "(?i)cluster.*terminated.*unexpect"
+    - name: communication_lost
+      regex: "(?i)communication\\s+lost"
+    # Code and reason phrase are often separated by punctuation, e.g. "APIError: [503]: The
+    # service is currently unavailable." An anchored form misses that and the failure falls
+    # through to CODE_BUG.
+    - name: http_transient
+      regex: "(?i)\\b(429|502|503|504)\\b.{0,60}?(bad gateway|service (is )?(currently )?unavailable|gateway time|temporarily unavailable|rate.?limit)"
+    - name: generic_transient
+      regex: "(?i)temporary.*failure|transient.*error"
+  UPSTREAM_DATA:
+    - name: data_not_available
+      regex: "(?i)data\\s*not\\s*(available|ready|found|up.?to.?date)"
+    - name: empty_data
+      regex: "(?i)empty\\s*DataFrame|no\\s*data\\s*(found|returned|available)"
+    - name: upstream_stale
+      regex: "(?i)source\\s*table.*empty|upstream.*not.*refresh|stale\\s*data"
+    # A partner SFTP file that has not been delivered yet. Routed ahead of CODE_BUG/file_error
+    # because no code change would have helped this run; it self-resolves on the next cycle.
+    - name: sftp_file_missing
+      regex: "(?i)FileNotFoundError.*sftp|sftp.*FileNotFoundError|No such file.*sftp"
+  CONFIG_ERROR:
+    - name: git_unknown_ref
+      regex: "GIT_UNKNOWN_REF"
+    - name: git_checkout_failed
+      regex: "(?i)Failed to checkout Git repository"
+    - name: git_branch_not_found
+      regex: "(?i)Commit ref refs/heads/.+ not found"
+    - name: missing_secret_scope
+      regex: "(?i)secret scope.*(does not exist|not found)|scope.*not.*found"
+  CODE_BUG:
+    - name: python_error
+      regex: "(?i)\\b(KeyError|AttributeError|TypeError|NameError|ImportError|IndexError|ValueError|ZeroDivisionError)\\b"
+    - name: file_error
+      regex: "(?i)\\b(FileNotFoundError|IsADirectoryError|NotADirectoryError)\\b"
+    - name: io_error
+      regex: "(?i)\\b(PermissionError|OSError|IOError)\\b"
+    # SSH/SFTP library errors: partner server changed algorithms or host keys. The fix lives in
+    # our code (pin the library, add disabled_algorithms / preferred kex).
+    - name: sftp_ssh_incompatible_peer
+      regex: "(?i)IncompatiblePeer"
+    - name: sftp_ssh_error
+      regex: "(?i)paramiko\\.ssh_exception\\.\\w+|BadHostKeyException|SSHException"
+    - name: syntax_error
+      regex: "(?i)\\b(SyntaxError|IndentationError)\\b"
+    - name: missing_module
+      regex: "(?i)ModuleNotFoundError|No module named"
+    - name: sql_error
+      regex: "(?i)SQL compilation error|invalid identifier|does not exist or not authorized|AnalysisException"
+    - name: sql_ambiguous
+      regex: "(?i)ambiguous column name|duplicate column"
+    - name: permission_error
+      regex: "(?i)permission\\s*denied|access\\s*denied|not\\s*authorized"
+    - name: auth_error
+      regex: "(?i)authentication.*fail|invalid.*credential|401\\s*Unauthorized"
+    - name: missing_secret
+      regex: "(?i)secret.*not.*found"

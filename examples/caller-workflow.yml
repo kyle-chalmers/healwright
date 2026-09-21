@@ -1,0 +1,23 @@
+# Put this in YOUR jobs repo at .github/workflows/self-healing-fix.yml.
+# It fires when the healer labels an issue and hands the work to healwright's reusable workflow.
+name: Self-healing fix
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+jobs:
+  fix:
+    if: github.event.label.name == 'self-healing-fix'
+    uses: kyle-chalmers/healwright/.github/workflows/fix.yml@v1
+    with:
+      issue_number: ${{ github.event.issue.number }}
+      bot_login: your-healer-app[bot]     # exact login of the GitHub App that files the issues
+      source_root: jobs                   # edits confined to one folder under here
+      # runner: your-self-hosted-label    # if your workspace/API is IP-allowlisted
+    secrets:
+      app_id: ${{ secrets.HEALWRIGHT_APP_ID }}
+      app_private_key: ${{ secrets.HEALWRIGHT_APP_PRIVATE_KEY }}
+      claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

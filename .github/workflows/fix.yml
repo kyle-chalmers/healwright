@@ -1,0 +1,481 @@
+# healwright reusable fix workflow.
+#
+# Consumers call this from their own jobs repo (see examples/caller-workflow.yml). It turns a
+# healer-created issue into a DRAFT pull request, or a comment + `needs-human` label.
+#
+# Trust boundary (docs/guardrails.md): THREE JOBS.
+#   gate         Reads the issue BEFORE the AI runs and snapshots the allowed folder as an
+#                immutable job output. Nothing the AI does later can change what `publish` trusts.
+#   investigate  The AI runs here. This job holds a READ-ONLY App token (contents + issues read;
+#                no write scope of any kind). Everything the AI touched leaves as a patch
+#                artifact, nothing else. Anything the AI could poison (GITHUB_ENV, PATH, git
+#                hooks, files, the action's own post-steps) dies with this runner and can write
+#                nothing on GitHub.
+#   publish      A fresh runner and a fresh checkout. It takes the folder from `gate`, validates
+#                every path in the patch, applies it, and only then mints a write-scoped token to
+#                commit, push, and open a DRAFT PR. On any failure it comments on the issue and
+#                labels it `needs-human`.
+# One run per issue at a time (concurrency group), so two label events seconds apart cannot race.
+name: healwright fix
+
+on:
+  workflow_call:
+    inputs:
+      issue_number:
+        description: The healer-created issue to work
+        required: true
+        type: number
+      bot_login:
+        description: Exact login of the account that creates healer issues, e.g. my-healer[bot]
+        required: true
+        type: string
+      source_root:
+        description: Repo folder that owns job source; edits are confined to one folder beneath it
+        required: false
+        type: string
+        default: jobs
+      fix_label:
+        required: false
+        type: string
+        default: self-healing-fix
+      needs_human_label:
+        required: false
+        type: string
+        default: needs-human
+      max_turns:
+        required: false
+        type: number
+        default: 80
+      decide_by_turn:
+        required: false
+        type: number
+        default: 50
+      runner:
+        description: runs-on label (self-hosted runners for IP-allowlisted workspaces)
+        required: false
+        type: string
+        default: ubuntu-latest
+      model:
+        description: Optional model override passed to Claude Code
+        required: false
+        type: string
+        default: ""
+      debug_output:
+        description: Show the agent's full tool output in the Actions log (may expose source and API responses; leave off for public repos)
+        required: false
+        type: boolean
+        default: false
+      base_branch:
+        required: false
+        type: string
+        default: main
+      branch_prefix:
+        required: false
+        type: string
+        default: healwright/fix-
+      context_files:
+        description: Space-separated repo files Claude should read first (conventions, architecture)
+        required: false
+        type: string
+        default: AGENTS.md
+    secrets:
+      app_id:
+        description: GitHub App id (org-owned; the same App the healer uses)
+        required: true
+      app_private_key:
+        required: true
+      claude_code_oauth_token:
+        required: false
+      anthropic_api_key:
+        required: false
+
+permissions: {}
+
+concurrency:
+  group: healwright-fix-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  ISSUE_NUMBER: ${{ inputs.issue_number }}
+  BOT_LOGIN: ${{ inputs.bot_login }}
+  SOURCE_ROOT: ${{ inputs.source_root }}
+  FIX_LABEL: ${{ inputs.fix_label }}
+  NEEDS_HUMAN_LABEL: ${{ inputs.needs_human_label }}
+  BASE_BRANCH: ${{ inputs.base_branch }}
+  BRANCH_PREFIX: ${{ inputs.branch_prefix }}
+
+jobs:
+  # ============================================================================ gate (pre-AI snapshot)
+  gate:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      ok: ${{ steps.issue.outputs.ok }}
+      problems: ${{ steps.issue.outputs.problems }}
+      allowed_folder: ${{ steps.issue.outputs.allowed_folder }}
+      notebook_path: ${{ steps.issue.outputs.notebook_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.base_branch }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Read and validate the issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: python -I {0}
+        run: |
+          import json, os, re, subprocess, uuid
+          repo, n = os.environ["REPO"], os.environ["ISSUE_NUMBER"]
+          issue = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/issues/{n}"]))
+          author = (issue.get("user") or {}).get("login", "")
+          labels = [lb["name"] for lb in issue.get("labels", [])]
+          body = issue.get("body") or ""
+          problems = []
+          if author != os.environ["BOT_LOGIN"]:
+              problems.append(f"issue author {author!r} is not the healer bot {os.environ['BOT_LOGIN']!r}")
+          if os.environ["FIX_LABEL"] not in labels:
+              problems.append(f"issue lacks label {os.environ['FIX_LABEL']!r}")
+          m = re.search(r"\|\s*Notebook Path\s*\|\s*`([^`]+)`\s*\|", body)
+          nb = m.group(1).strip() if m else ""
+          root = [p for p in os.environ["SOURCE_ROOT"].strip("/").split("/") if p]
+          parts = [p.strip() for p in nb.lstrip("/").split("/")]
+          folder = ""
+          if nb and len(parts) >= len(root) + 2 and parts[:len(root)] == root:
+              cand = parts[len(root)]
+              if cand not in (".", "..") and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", cand):
+                  folder = "/".join(root + [cand]) + "/"
+          if not folder:
+              problems.append(f"could not derive a job folder under {os.environ['SOURCE_ROOT']!r} from notebook path {nb!r}")
+          elif not os.path.isdir(folder):
+              problems.append(f"folder {folder!r} does not exist in this checkout")
+          delim = "HW" + uuid.uuid4().hex
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print(f"allowed_folder={folder}", file=out)
+              print(f"notebook_path={nb}", file=out)
+              print(f"ok={'true' if not problems else 'false'}", file=out)
+              print(f"problems<<{delim}\n" + "\n".join(problems) + f"\n{delim}", file=out)
+          print("\n".join(problems) if problems else f"ok: folder {folder}")
+
+  # ============================================================================ untrusted job
+  investigate:
+    needs: gate
+    if: needs.gate.outputs.ok == 'true'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      claude_outcome: ${{ steps.claude.outcome }}
+    env:
+      OUT_DIR: ${{ runner.temp }}/healwright-out
+      ALLOWED_FOLDER: ${{ needs.gate.outputs.allowed_folder }}
+      NOTEBOOK_PATH: ${{ needs.gate.outputs.notebook_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      # READ-ONLY on every scope. The action runs its own steps after the model in this job; if the
+      # model poisoned the environment, those steps still cannot write anything on GitHub.
+      - name: Mint read-only App token for the AI step
+        id: ro-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+          permission-contents: read
+          permission-metadata: read
+          permission-issues: read
+          permission-pull-requests: read
+
+      - name: Prepare the summary file
+        shell: python -I {0}
+        run: |
+          import os
+          os.makedirs(os.environ["OUT_DIR"], exist_ok=True)
+          open(os.path.join(os.environ["OUT_DIR"], "summary.md"), "w").write("NO-FIX\n\n(the agent did not replace this summary)\n")
+
+      - name: Claude Code investigates and edits the working tree
+        id: claude
+        continue-on-error: true
+        # SHA-pinned: this action receives the model credential. Bump deliberately.
+        uses: anthropics/claude-code-action@cfc3eb22bfed5c26ef66e3223c982af27e4524de # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.claude_code_oauth_token }}
+          anthropic_api_key: ${{ secrets.anthropic_api_key }}
+          # Explicit, read-scoped token: the action must not fall back to a write-capable one.
+          github_token: ${{ steps.ro-token.outputs.token }}
+          allowed_bots: ${{ inputs.bot_login }}
+          show_full_output: ${{ inputs.debug_output }}
+          prompt: |
+            You are the healwright fix agent for a data-jobs repository.
+
+            An automated healer detected a CODE_BUG failure and opened issue #${{ inputs.issue_number }}.
+            Read it with the GitHub tools available to you. It contains the failing notebook path,
+            the error output, and a classification.
+
+            SCOPE (enforced afterwards by a separate trusted job; anything outside is discarded):
+            - You may ONLY modify files under: ${{ needs.gate.outputs.allowed_folder }}
+            - Do NOT touch workflow files, AGENTS.md, CLAUDE.md, shared libraries, or other job folders.
+            - Do NOT push, create branches, or open pull requests. You have no credentials for it.
+              A trusted job turns your working-tree edits into a draft PR.
+            - Do NOT run the notebook or install packages. Read-only diagnostics only.
+
+            TASK:
+            1. Read the issue, then the failing notebook: ${{ needs.gate.outputs.notebook_path }}
+            2. Read the job's own notes in the same folder (claude.md / README) if present.
+            3. Read repo conventions: ${{ inputs.context_files }}
+            4. Check recent history: git log --oneline -10 -- <the notebook file>
+            5. Determine the root cause. If you can fix it with a minimal change inside the allowed
+               folder, make the edit in the working tree.
+            6. ALWAYS replace the contents of ${{ runner.temp }}/healwright-out/summary.md (it exists; edit it) with:
+               - Root cause (one paragraph)
+               - What you changed, or why you did not (files, reasoning)
+               - What a reviewer should verify before merging
+               First line of that file: `FIX` if you made a change, `NO-FIX` if you did not.
+
+            TURN BUDGET (non-negotiable): you have ${{ inputs.max_turns }} turns. By turn
+            ${{ inputs.decide_by_turn }} you MUST have either made the edit or written a NO-FIX summary
+            explaining what is blocking a confident fix. A useful summary beats silence.
+          claude_args: >-
+            --max-turns ${{ inputs.max_turns }}
+            ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
+            --allowed-tools "Read,Grep,Glob,Edit,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(git blame:*),Bash(ls:*),Bash(grep:*),Bash(rg:*),Bash(pip show:*),WebFetch"
+
+      # From here on this runner may be poisoned (GITHUB_ENV, PATH, hooks, files). Nothing below
+      # holds a secret, and the only thing that leaves is the artifact, which `publish` validates.
+      - name: Package the working-tree changes as a patch
+        id: package
+        if: always()
+        shell: python -I {0}
+        run: |
+          import os, subprocess
+          out = os.environ["OUT_DIR"]
+          os.makedirs(out, exist_ok=True)
+          g = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+          # intent-to-add makes untracked files show in the diff without staging content
+          subprocess.run(g + ["add", "-N", "--", "."], check=False)
+          patch = subprocess.run(g + ["diff", "--binary", "--no-color", "HEAD"], capture_output=True, check=False).stdout
+          open(os.path.join(out, "changes.patch"), "wb").write(patch)
+          if not os.path.exists(os.path.join(out, "summary.md")):
+              open(os.path.join(out, "summary.md"), "w").write("MISSING\n(the agent produced no summary)\n")
+          print(f"patch bytes: {len(patch)}")
+
+      - name: Upload patch artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: healwright-${{ inputs.issue_number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/healwright-out
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ============================================================================ trusted job
+  publish:
+    needs: [gate, investigate]
+    if: always() && needs.gate.result == 'success'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+    env:
+      IN_DIR: ${{ runner.temp }}/healwright-in
+      # Authority for scope comes from `gate`, computed before the AI ran. Never from `investigate`,
+      # never from the (mutable) issue after the fact.
+      ISSUE_OK: ${{ needs.gate.outputs.ok }}
+      PROBLEMS: ${{ needs.gate.outputs.problems }}
+      ALLOWED_FOLDER: ${{ needs.gate.outputs.allowed_folder }}
+      CLAUDE_OUTCOME: ${{ needs.investigate.outputs.claude_outcome }}
+    steps:
+      - name: Fresh checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.base_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Download patch artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: healwright-${{ inputs.issue_number }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/healwright-in
+
+      - name: Validate and apply the patch
+        id: scope
+        if: always()
+        shell: python -I {0}
+        run: |
+          import os, re, subprocess, uuid
+          allowed = os.environ["ALLOWED_FOLDER"]
+          patch_path = os.path.join(os.environ["IN_DIR"], "changes.patch")
+          violations, files = [], []
+          has_patch = os.path.exists(patch_path) and os.path.getsize(patch_path) > 0
+          if os.environ.get("ISSUE_OK") != "true" or not allowed:
+              violations.append("issue did not pass the gate")
+          if has_patch and not violations:
+              text = open(patch_path, "rb").read().decode("utf-8", "replace")
+              # every path the patch names, from headers and rename/copy lines
+              for m in re.finditer(r"^diff --git a/(.+?) b/(.+)$", text, re.M):
+                  files += [m.group(1), m.group(2)]
+              for m in re.finditer(r"^(?:rename|copy) (?:from|to) (.+)$", text, re.M):
+                  files.append(m.group(1))
+              for m in re.finditer(r"^\+\+\+ b/(.+)$|^--- a/(.+)$", text, re.M):
+                  files.append(m.group(1) or m.group(2))
+              files = sorted({f.strip().strip('"') for f in files if f and f.strip() not in ("/dev/null",)})
+              root = os.path.realpath(".")
+              allowed_real = os.path.realpath(allowed)
+              for f in files:
+                  real = os.path.realpath(os.path.join(root, f))
+                  inside = real == allowed_real or real.startswith(allowed_real + os.sep)
+                  bad_name = f.startswith((".github/", ".claude/", ".git/")) or os.path.basename(f) in {"AGENTS.md", "CLAUDE.md"} or ".." in f.split("/")
+                  if not inside or bad_name or not real.startswith(root + os.sep):
+                      violations.append(f)
+              if not violations:
+                  g = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
+                  chk = subprocess.run(g + ["apply", "--check", "--whitespace=nowarn", patch_path], capture_output=True, text=True)
+                  if chk.returncode != 0:
+                      violations.append("patch does not apply cleanly to " + os.environ["BASE_BRANCH"] + ": " + chk.stderr.strip()[:300])
+                  else:
+                      subprocess.run(g + ["apply", "--whitespace=nowarn", patch_path], check=True)
+                      # belt and braces: what actually changed on disk must also be inside the folder
+                      status = subprocess.check_output(g + ["status", "--porcelain", "--untracked-files=all"], text=True)
+                      for line in status.splitlines():
+                          p = line[3:].strip().strip('"')
+                          if " -> " in p:
+                              p = p.split(" -> ", 1)[1]
+                          real = os.path.realpath(os.path.join(root, p))
+                          if not (real == allowed_real or real.startswith(allowed_real + os.sep)):
+                              violations.append(f"applied change outside folder: {p}")
+                      if any(v.startswith("applied change") for v in violations):
+                          subprocess.run(g + ["checkout", "--", "."], check=False)
+                          subprocess.run(g + ["clean", "-fdq"], check=False)
+          delim = "HW" + uuid.uuid4().hex
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print(f"has_changes={'true' if has_patch else 'false'}", file=out)
+              print(f"scope_ok={'true' if not violations else 'false'}", file=out)
+              print(f"violations<<{delim}\n" + "\n".join(violations) + f"\n{delim}", file=out)
+          print("files:", files, "\nviolations:", violations)
+
+      - name: Read summary
+        id: summary
+        if: always()
+        shell: python -I {0}
+        run: |
+          import os
+          f = os.path.join(os.environ["IN_DIR"], "summary.md")
+          if not os.path.exists(f):
+              os.makedirs(os.environ["IN_DIR"], exist_ok=True)
+              open(f, "w").write("MISSING\n(no summary was produced)\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              print(f"path={f}", file=out)
+
+      - name: Mint write-scoped App token for the trusted steps
+        id: rw-token
+        if: always()
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.app_id }}
+          private-key: ${{ secrets.app_private_key }}
+          permission-contents: write
+          permission-metadata: read
+          permission-issues: write
+          permission-pull-requests: write
+
+      - name: Commit, push, open draft PR
+        id: pr
+        if: needs.gate.outputs.ok == 'true' && steps.scope.outputs.has_changes == 'true' && steps.scope.outputs.scope_ok == 'true'
+        env:
+          GH_TOKEN: ${{ steps.rw-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SUMMARY_PATH: ${{ steps.summary.outputs.path }}
+          APP_SLUG: ${{ steps.rw-token.outputs.app-slug }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          g() { git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c credential.helper= "$@"; }
+          branch="${BRANCH_PREFIX}${ISSUE_NUMBER}-${RUN_ID}"
+          g config user.name "${APP_SLUG}[bot]"
+          g config user.email "${APP_SLUG}[bot]@users.noreply.github.com"
+          g checkout -b "$branch"
+          g add -A -- "$ALLOWED_FOLDER"
+          g commit -m "fix: ${ALLOWED_FOLDER%/} (healwright #${ISSUE_NUMBER})"
+          g push "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "HEAD:refs/heads/${branch}"
+          {
+            echo "Automated DRAFT fix for #${ISSUE_NUMBER}. Human review is mandatory before merge."
+            echo
+            echo "Scope: \`${ALLOWED_FOLDER}\` only (every path validated in a clean job before applying)."
+            echo
+            echo "## Agent summary"
+            echo
+            tail -n +2 "$SUMMARY_PATH"
+            echo
+            echo "Closes #${ISSUE_NUMBER}"
+          } > "$RUNNER_TEMP/pr-body.md"
+          url="$(gh pr create --draft --repo "$REPO" --base "$BASE_BRANCH" --head "$branch" \
+                 --title "fix: ${ALLOWED_FOLDER%/} (healwright #${ISSUE_NUMBER})" --body-file "$RUNNER_TEMP/pr-body.md")"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          gh issue comment "$ISSUE_NUMBER" --repo "$REPO" --body "Draft PR opened: $url (human review required before merge)."
+
+      - name: Comment when there is no PR
+        if: always() && steps.pr.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ steps.rw-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          SCOPE_OK: ${{ steps.scope.outputs.scope_ok }}
+          VIOLATIONS: ${{ steps.scope.outputs.violations }}
+          HAS_CHANGES: ${{ steps.scope.outputs.has_changes }}
+          SUMMARY_PATH: ${{ steps.summary.outputs.path }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        shell: python -I {0}
+        run: |
+          import os, subprocess
+          e = os.environ
+          lines = [f"healwright fix run finished without a pull request. Run: {e['RUN_URL']}", ""]
+          if e.get("ISSUE_OK") != "true":
+              lines += ["The issue did not pass the gate:", ""] + [f"- {p}" for p in e.get("PROBLEMS", "").splitlines() if p]
+          elif e.get("SCOPE_OK") == "false":
+              lines += ["The agent's patch touched paths outside the allowed folder (or did not apply); it was DISCARDED:", ""] + [f"- {v}" for v in e.get("VIOLATIONS", "").splitlines() if v]
+          elif e.get("CLAUDE_OUTCOME") != "success":
+              lines += [f"The agent step ended with outcome: {e.get('CLAUDE_OUTCOME')} (turn limit, auth, or runtime error)."]
+          elif e.get("HAS_CHANGES") != "true":
+              lines += ["The agent finished without a confident fix."]
+          summary = ""
+          try:
+              summary = "".join(open(e["SUMMARY_PATH"], encoding="utf-8", errors="replace").readlines()[1:])
+          except OSError:
+              pass
+          lines += ["", "## Agent summary", "", summary[:60000]]
+          body_path = os.path.join(e["RUNNER_TEMP"], "healwright-comment.md")
+          open(body_path, "w", encoding="utf-8").write("\n".join(lines))
+          subprocess.run(["gh", "issue", "comment", e["ISSUE_NUMBER"], "--repo", e["REPO"], "--body-file", body_path], check=True)
+          subprocess.run(["gh", "issue", "edit", e["ISSUE_NUMBER"], "--repo", e["REPO"], "--add-label", e["NEEDS_HUMAN_LABEL"]], check=True)
+
+      - name: Fail the run on a scope violation
+        if: always() && steps.scope.outputs.scope_ok == 'false' && steps.scope.outputs.has_changes == 'true'
+        shell: python -I {0}
+        run: |
+          print("::error::healwright: the agent's patch reached outside the allowed folder; it was discarded and the issue labelled.")
+          raise SystemExit(1)

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "healwright",
+  "displayName": "healwright",
+  "version": "0.1.0",
+  "description": "Methodology and reference kit for trigger-based self-healing data jobs: audit your jobs, build your own healer from the copyable template, install the in-job trigger, and route code bugs to a guarded AI fix workflow.",
+  "author": {"name": "Kyle Chalmers"},
+  "homepage": "https://github.com/kyle-chalmers/healwright",
+  "repository": "https://github.com/kyle-chalmers/healwright",
+  "license": "MIT",
+  "keywords": ["databricks", "self-healing", "data-engineering", "observability", "claude-code", "github-actions"]
+}

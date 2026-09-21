@@ -1,0 +1,7 @@
+# zizmor policy for this repo's workflows: every action, including Anthropic's, is pinned to a
+# full commit SHA with a version comment. Bump deliberately; tests/test_workflow.py enforces it.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        "*": hash-pin

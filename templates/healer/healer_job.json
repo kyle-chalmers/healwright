@@ -1,0 +1,49 @@
+{
+  "name": "healwright-healer",
+  "description": "healwright shared healer: called by every monitored job's __healwright leaf task on failure (mode=leaf-task); the hourly schedule runs the reconciler and follow-ups (mode=reconcile).",
+  "tags": {"healwright": "healer"},
+  "max_concurrent_runs": 10,
+  "queue": {"enabled": true},
+  "timeout_seconds": 1800,
+  "parameters": [
+    {"name": "mode", "default": "reconcile"},
+    {"name": "parent_job_id", "default": ""},
+    {"name": "parent_run_id", "default": ""},
+    {"name": "parent_job_name", "default": ""},
+    {"name": "workspace_id", "default": ""},
+    {"name": "workspace_url", "default": ""},
+    {"name": "config_path", "default": ""}
+  ],
+  "schedule": {
+    "quartz_cron_expression": "0 15 * * * ?",
+    "timezone_id": "UTC",
+    "pause_status": "UNPAUSED"
+  },
+  "git_source": {
+    "git_url": "https://github.com/YOUR-ORG/YOUR-JOBS-REPO.git",
+    "git_provider": "gitHub",
+    "git_branch": "main"
+  },
+  "tasks": [
+    {
+      "task_key": "heal",
+      "notebook_task": {
+        "notebook_path": "jobs/self_healing/healer",
+        "source": "GIT"
+      },
+      "new_cluster": {
+        "spark_version": "15.4.x-scala2.12",
+        "node_type_id": "REPLACE_WITH_SMALL_NODE_TYPE",
+        "num_workers": 0,
+        "spark_conf": {"spark.master": "local[*]"},
+        "data_security_mode": "SINGLE_USER"
+      },
+      "timeout_seconds": 1500,
+      "max_retries": 1,
+      "min_retry_interval_millis": 60000,
+      "retry_on_timeout": true
+    }
+  ],
+  "run_as": {"service_principal_name": "REPLACE_WITH_SERVICE_PRINCIPAL_ID"},
+  "format": "MULTI_TASK"
+}

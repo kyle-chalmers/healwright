@@ -1,0 +1,12 @@
+{
+  "name": "healwright",
+  "owner": {"name": "Kyle Chalmers"},
+  "description": "healwright: build trigger-based self-healing data jobs from a reviewed reference, with Claude Code.",
+  "plugins": [
+    {
+      "name": "healwright",
+      "source": "./",
+      "description": "Three skills that walk a team through auditing jobs, building their own healer from templates/healer, and installing the failure trigger on their jobs."
+    }
+  ]
+}

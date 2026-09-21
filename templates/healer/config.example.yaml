@@ -1,0 +1,65 @@
+# healwright configuration. Copy to config.yaml next to healer.py and edit.
+# Values of the form ${env:NAME} come from environment variables; ${secret:scope/key} from the
+# platform secret store (Databricks secret scopes). Nothing secret goes in this file.
+
+platform: databricks
+tenant: ""                         # optional prefix for multi-account deployments
+healer_job_name: healwright-healer # the shared healer job; never monitors itself
+# healer_job_id: 123456789         # set after creating the healer job (belt and braces)
+
+jobs:
+  include: ["*"]                   # fnmatch globs on job display name
+  exclude: ["adhoc_*", "*_dev"]
+  exclude_healer: true
+
+state:
+  backend: delta                   # delta (inside Databricks) | sqlite (local / tests)
+  delta_schema: main.healwright    # catalog.schema; tables are created on first run
+  sqlite_path: healwright.db
+
+patterns_file: patterns.yaml       # relative to this file
+classification:                    # optional additions; user patterns win within a category
+  patterns:
+    UPSTREAM_DATA: []
+    # - name: partner_feed_late
+    #   regex: "(?i)partner feed not yet delivered"
+
+policy:
+  dedup_window_hours: 4            # same category+pattern again within this window: no new alert
+  thread_reset_hours: 24           # start a new Slack thread after this long
+  max_alerts_per_run: 10           # flood protection per healer invocation
+  max_issues_per_hour: 5           # GitHub issue cap across all jobs
+  escalation_threshold: 3          # consecutive CONFIG_ERROR / UPSTREAM_DATA failures before escalation footer
+  lease_seconds: 900               # how long one healer owns an incident before another may resume it
+  issue_categories: [CODE_BUG]     # which classifications open a fix-pipeline issue
+  include_raw_trace: false         # redacted traces in issue bodies (opt in; public repos: leave off)
+  shadow: false                    # true = write state, post nothing (use during validation)
+
+redaction:
+  extra_patterns: []               # extra regexes to redact, e.g. "ACME-[0-9]+"
+
+slack:
+  enabled: false
+  channel: ""                      # channel ID
+  bot_token: "${secret:healwright/slack_bot_token}"
+
+github:
+  enabled: false
+  repo: "your-org/your-jobs-repo"
+  api_base: https://api.github.com
+  auth:
+    type: app                      # app (recommended, org-owned) | token
+    app_id: "${secret:healwright/github_app_id}"
+    installation_id: "${secret:healwright/github_installation_id}"
+    private_key: "${secret:healwright/github_app_private_key}"
+    # token: "${secret:healwright/github_token}"
+  label: self-healing-fix          # the label the reusable fix workflow listens for
+  needs_human_label: needs-human
+  source_root: jobs                # notebook paths must live under this repo folder to be eligible
+  repo_checkout: ""                # optional local checkout to verify the folder exists
+
+reconcile:
+  overlap_minutes: 30              # re-scan this much before the last sweep end
+  initial_lookback_minutes: 120    # first sweep when no watermark exists
+  max_window_minutes: 4320         # cap per sweep; the next sweep continues from the watermark
+  max_run_hours: 24                # reach back this far before the watermark: the API filters on START time

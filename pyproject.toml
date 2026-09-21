@@ -1,0 +1,21 @@
+# healwright is not a pip package. This file only configures the dev tooling (ruff, pytest)
+# for the repo. The thing people use is templates/healer/ (copied into their own jobs repo),
+# .github/workflows/fix.yml (referenced with `uses:`), and skills/ (Claude Code skills).
+[project]
+name = "healwright-dev"
+version = "0.1.0"
+description = "Dev tooling config for the healwright repo (not published)"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["examples"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["templates/healer", "tools"]

@@ -1,0 +1,17 @@
+{
+  "job_id": 111,
+  "settings": {
+    "name": "example_daily_load",
+    "format": "MULTI_TASK",
+    "max_concurrent_runs": 1,
+    "email_notifications": {},
+    "webhook_notifications": {"on_failure": [{"id": "00000000-0000-0000-0000-000000000000"}]},
+    "run_as": {"service_principal_name": "sp-example"},
+    "job_clusters": [{"job_cluster_key": "small", "new_cluster": {"spark_version": "15.4.x-scala2.12", "node_type_id": "example", "num_workers": 0}}],
+    "tasks": [
+      {"task_key": "extract", "job_cluster_key": "small", "notebook_task": {"notebook_path": "jobs/example_daily_load/extract", "source": "GIT"}, "max_retries": 1},
+      {"task_key": "transform", "depends_on": [{"task_key": "extract"}], "job_cluster_key": "small", "notebook_task": {"notebook_path": "jobs/example_daily_load/transform", "source": "GIT"}},
+      {"task_key": "load", "depends_on": [{"task_key": "transform"}], "job_cluster_key": "small", "notebook_task": {"notebook_path": "jobs/example_daily_load/load", "source": "GIT"}}
+    ]
+  }
+}

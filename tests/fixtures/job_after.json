@@ -1,0 +1,119 @@
+{
+  "email_notifications": {},
+  "format": "MULTI_TASK",
+  "job_clusters": [
+    {
+      "job_cluster_key": "small",
+      "new_cluster": {
+        "node_type_id": "example",
+        "num_workers": 0,
+        "spark_version": "15.4.x-scala2.12"
+      }
+    }
+  ],
+  "max_concurrent_runs": 1,
+  "name": "example_daily_load",
+  "run_as": {
+    "service_principal_name": "sp-example"
+  },
+  "tasks": [
+    {
+      "job_cluster_key": "small",
+      "max_retries": 1,
+      "notebook_task": {
+        "notebook_path": "jobs/example_daily_load/extract",
+        "source": "GIT"
+      },
+      "task_key": "extract"
+    },
+    {
+      "depends_on": [
+        {
+          "task_key": "extract"
+        }
+      ],
+      "job_cluster_key": "small",
+      "notebook_task": {
+        "notebook_path": "jobs/example_daily_load/transform",
+        "source": "GIT"
+      },
+      "task_key": "transform"
+    },
+    {
+      "depends_on": [
+        {
+          "task_key": "transform"
+        }
+      ],
+      "job_cluster_key": "small",
+      "notebook_task": {
+        "notebook_path": "jobs/example_daily_load/load",
+        "source": "GIT"
+      },
+      "task_key": "load"
+    },
+    {
+      "depends_on": [
+        {
+          "task_key": "extract"
+        },
+        {
+          "task_key": "transform"
+        },
+        {
+          "task_key": "load"
+        }
+      ],
+      "description": "healwright: on any task failure, call the shared healer job (trigger-based self-healing).",
+      "email_notifications": {},
+      "max_retries": 0,
+      "run_if": "AT_LEAST_ONE_FAILED",
+      "run_job_task": {
+        "job_id": 999,
+        "job_parameters": {
+          "mode": "leaf-task",
+          "parent_job_id": "{{job.id}}",
+          "parent_job_name": "{{job.name}}",
+          "parent_run_id": "{{job.run_id}}",
+          "workspace_id": "{{workspace.id}}",
+          "workspace_url": "{{workspace.url}}"
+        }
+      },
+      "task_key": "__healwright",
+      "timeout_seconds": 1800,
+      "webhook_notifications": {}
+    },
+    {
+      "depends_on": [
+        {
+          "task_key": "extract"
+        },
+        {
+          "task_key": "transform"
+        },
+        {
+          "task_key": "load"
+        }
+      ],
+      "description": "healwright: fail on purpose after an upstream failure so the run stays FAILED and on_failure notifications keep firing.",
+      "email_notifications": {},
+      "job_cluster_key": "small",
+      "max_retries": 0,
+      "run_if": "AT_LEAST_ONE_FAILED",
+      "spark_python_task": {
+        "python_file": "jobs/self_healing/propagate.py",
+        "source": "GIT"
+      },
+      "task_key": "__healwright_propagate",
+      "timeout_seconds": 300,
+      "webhook_notifications": {}
+    }
+  ],
+  "webhook_notifications": {
+    "on_failure": [
+      {
+        "id": "00000000-0000-0000-0000-000000000000"
+      }
+    ]
+  }
+}
