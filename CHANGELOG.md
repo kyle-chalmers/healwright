@@ -38,7 +38,10 @@ a model can write during its step (`GITHUB_ENV`, `PATH`, git hooks) is applied t
 step in the same job, including the action's own, and a mutable issue body cannot be the authority
 for scope once the AI has run. All actions are SHA-pinned; the model's `Edit` is path-scoped and
 it receives the issue and git history as files instead of tools; its summary is redacted and
-fenced before publication; the caller grants the read permissions the gate needs. Lease owner
+fenced before publication; the caller grants the read permissions the gate needs. A sixth pass
+then removed the model's remaining shell and web tools entirely (`rg --pre`, `pip --log` and
+`WebFetch` were escape routes), moved the scratch files inside the checkout so the `Edit` rule
+needs no runner path, and made the summary artifact redacted and one-day. Lease owner
 tokens guard completion and release; the installer checks the job's effective run-as identity
 and blocks when the healer's permissions cannot be read.
 

@@ -182,9 +182,6 @@ jobs:
       NOTEBOOK_PATH: ${{ needs.gate.outputs.notebook_path }}
     steps:
       # `runner.temp` is not available in job-level env, so the scratch dir is set here (before the AI).
-      - name: Set scratch directory
-        shell: bash
-        run: echo "OUT_DIR=${RUNNER_TEMP}/healwright-out" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -209,6 +206,8 @@ jobs:
 
       # The model gets the issue and the git history as FILES, so it needs no GitHub tool and no
       # shell git (git log --output=<file> is a write primitive we do not want it to have).
+      # The scratch dir lives INSIDE the checkout (repo-relative, so the Edit permission rule can name it
+      # without runner.temp) and is excluded from the patch and forbidden in publish.
       - name: Prepare issue text, history, and the summary file
         env:
           GH_TOKEN: ${{ github.token }}
@@ -216,7 +215,7 @@ jobs:
         shell: python -I {0}
         run: |
           import json, os, subprocess
-          out = os.environ["OUT_DIR"]
+          out = ".healwright-out"
           os.makedirs(out, exist_ok=True)
           repo, n = os.environ["REPO"], os.environ["ISSUE_NUMBER"]
           issue = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/issues/{n}"]))
@@ -242,9 +241,9 @@ jobs:
             You are the healwright fix agent for a data-jobs repository.
 
             An automated healer detected a CODE_BUG failure and opened issue #${{ inputs.issue_number }}.
-            Its full text is in ${{ runner.temp }}/healwright-out/issue.md (read that file; you have
-            no GitHub tools). It contains the failing notebook path, the error output, and a classification.
-            Recent git history for the job folder is in ${{ runner.temp }}/healwright-out/history.txt.
+            Its full text is in .healwright-out/issue.md (read that file; you have no GitHub or shell
+            tools). It contains the failing notebook path, the error output, and a classification.
+            Recent git history for the job folder is in .healwright-out/history.txt.
 
             SCOPE (enforced afterwards by a separate trusted job; anything outside is discarded):
             - You may ONLY modify files under: ${{ needs.gate.outputs.allowed_folder }}
@@ -260,7 +259,7 @@ jobs:
             4. Read history.txt for recent changes to the folder.
             5. Determine the root cause. If you can fix it with a minimal change inside the allowed
                folder, make the edit in the working tree.
-            6. ALWAYS replace the contents of ${{ runner.temp }}/healwright-out/summary.md (it exists; edit it) with:
+            6. ALWAYS replace the contents of .healwright-out/summary.md (it exists; edit it) with:
                - Root cause (one paragraph)
                - What you changed, or why you did not (files, reasoning)
                - What a reviewer should verify before merging
@@ -272,7 +271,8 @@ jobs:
           claude_args: >-
             --max-turns ${{ inputs.max_turns }}
             ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
-            --allowed-tools "Read,Grep,Glob,Edit(${{ needs.gate.outputs.allowed_folder }}**),Edit(//${{ runner.temp }}/healwright-out/summary.md),Bash(ls:*),Bash(grep:*),Bash(rg:*),Bash(pip show:*),WebFetch"
+            --allowed-tools "Read,Grep,Glob,Edit(${{ needs.gate.outputs.allowed_folder }}**),Edit(.healwright-out/summary.md)"
+            --disallowedTools "Bash,Write,NotebookEdit,WebFetch,WebSearch,Agent,Task"
 
       # From here on this runner may be poisoned (GITHUB_ENV, PATH, hooks, files). Nothing below
       # holds a secret, and the only thing that leaves is the artifact, which `publish` validates.
@@ -281,16 +281,23 @@ jobs:
         if: always()
         shell: python -I {0}
         run: |
-          import os, subprocess
-          out = os.environ["OUT_DIR"]
-          os.makedirs(out, exist_ok=True)
+          import os, re, shutil, subprocess
+          out = ".healwright-out"
+          up = os.path.join(os.environ["RUNNER_TEMP"], "healwright-upload")
+          os.makedirs(up, exist_ok=True)
           g = ["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false"]
-          # intent-to-add makes untracked files show in the diff without staging content
-          subprocess.run(g + ["add", "-N", "--", "."], check=False)
-          patch = subprocess.run(g + ["diff", "--binary", "--no-color", "HEAD"], capture_output=True, check=False).stdout
-          open(os.path.join(out, "changes.patch"), "wb").write(patch)
-          if not os.path.exists(os.path.join(out, "summary.md")):
-              open(os.path.join(out, "summary.md"), "w").write("MISSING\n(the agent produced no summary)\n")
+          # intent-to-add makes untracked files show in the diff without staging content; the scratch dir is excluded
+          subprocess.run(g + ["add", "-N", "--", ".", ":!.healwright-out"], check=False)
+          patch = subprocess.run(g + ["diff", "--binary", "--no-color", "HEAD", "--", ".", ":!.healwright-out"], capture_output=True, check=False).stdout
+          open(os.path.join(up, "changes.patch"), "wb").write(patch)
+          src = os.path.join(out, "summary.md")
+          text = open(src, encoding="utf-8", errors="replace").read() if os.path.exists(src) else "MISSING\n(the agent produced no summary)\n"
+          # best-effort redaction before anything leaves this runner; publish redacts again authoritatively
+          for pat in (r"xox[baprs]-[0-9A-Za-z-]{10,}", r"\bgh[pousr]_[A-Za-z0-9]{20,}\b", r"\bAKIA[0-9A-Z]{16}\b",
+                      r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b", r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"):
+              text = re.sub(pat, "[REDACTED]", text)
+          open(os.path.join(up, "summary.md"), "w", encoding="utf-8").write(text[:30000])
+          shutil.rmtree(out, ignore_errors=True)
           print(f"patch bytes: {len(patch)}")
 
       - name: Upload patch artifact
@@ -298,9 +305,9 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: healwright-${{ inputs.issue_number }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/healwright-out
+          path: ${{ runner.temp }}/healwright-upload
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 1
 
   # ============================================================================ trusted job
   publish:
@@ -367,7 +374,7 @@ jobs:
               for f in files:
                   real = os.path.realpath(os.path.join(root, f))
                   inside = real == allowed_real or real.startswith(allowed_real + os.sep)
-                  bad_name = f.startswith((".github/", ".claude/", ".git/")) or os.path.basename(f) in {"AGENTS.md", "CLAUDE.md"} or ".." in f.split("/")
+                  bad_name = f.startswith((".github/", ".claude/", ".git/", ".healwright-out/")) or os.path.basename(f) in {"AGENTS.md", "CLAUDE.md"} or ".." in f.split("/")
                   if not inside or bad_name or not real.startswith(root + os.sep):
                       violations.append(f)
               if not violations:
@@ -415,11 +422,27 @@ jobs:
               (r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[:=]\s*)[^\s\"',;]{4,}", r"\1\2[REDACTED]"),
               (r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@", r"\1[REDACTED]@"),
               (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[REDACTED:email]"),
+              (r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{16,}", "[REDACTED:bearer]"),
+              (r"\b\d{3}-\d{2}-\d{4}\b", "[REDACTED:ssn]"),
+              (r"\b\d{4}[ -]\d{4}[ -]\d{4}[ -]\d{1,7}\b", "[REDACTED:card]"),
           ]
+          def _entropy(t):
+              import math
+              n = len(t); counts = {}
+              for ch in t: counts[ch] = counts.get(ch, 0) + 1
+              return -sum(c / n * math.log2(c / n) for c in counts.values())
+          def _secretish(m):
+              t = m.group(0)
+              if re.fullmatch(r"[0-9a-fA-F]+", t) or re.fullmatch(r"[0-9a-fA-F-]{36}", t):
+                  return t
+              mixed = any(c.isupper() for c in t) and any(c.islower() for c in t) and any(c.isdigit() for c in t)
+              return "[REDACTED:high_entropy]" if mixed and _entropy(t) >= 4.2 else t
           body = text.split("\n", 1)[1] if "\n" in text else ""
           for pat, repl in rules:
               body = re.sub(pat, repl, body)
-          body = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]", "", body)[:20000].replace("```", "` ` `")
+          body = re.sub(r"\b[A-Za-z0-9_\-/+=]{32,}\b", _secretish, body)
+          # no backticks at all inside the fence, so no sequence can close it
+          body = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]", "", body)[:20000].replace("`", "'")
           verdict = text.split("\n", 1)[0].strip()[:20]
           os.makedirs(os.environ["IN_DIR"], exist_ok=True)
           f = os.path.join(os.environ["IN_DIR"], "summary.fenced.md")

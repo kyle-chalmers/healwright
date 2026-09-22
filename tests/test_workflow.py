@@ -47,10 +47,11 @@ def test_untrusted_job_never_holds_any_write_scope():
     assert claude.get("continue-on-error") is True
     assert claude["with"]["show_full_output"] == "${{ inputs.debug_output }}"
     args = claude["with"]["claude_args"]
-    for banned in ("Write", "Bash(gh", "git push", "Bash(git", "Bash(find", "Bash(python3", "Bash(pip install", "Bash(sh", "Bash(bash", "Bash(cat", "Bash(tee", "Bash(echo", "mcp__github"):
-        assert banned not in args, banned
-    assert "Edit," not in args and "Edit(${{ needs.gate.outputs.allowed_folder }}**)" in args  # Edit is path-scoped
-    assert "Edit(//${{ runner.temp }}/healwright-out/summary.md)" in args
+    allowed = re.search(r'--allowed-tools "([^"]+)"', args).group(1).split(",")
+    assert allowed == ["Read", "Grep", "Glob", "Edit(${{ needs.gate.outputs.allowed_folder }}**)", "Edit(.healwright-out/summary.md)"]
+    disallowed = re.search(r'--disallowedTools "([^"]+)"', args).group(1).split(",")
+    assert {"Bash", "Write", "WebFetch", "WebSearch", "NotebookEdit"} <= set(disallowed)
+    assert "runner.temp" not in args
     assert "CLAUDE_BRANCH" not in str(claude)
     assert "Do NOT push" in claude["with"]["prompt"]
     assert "issue.md" in claude["with"]["prompt"] and "history.txt" in claude["with"]["prompt"]
@@ -62,7 +63,9 @@ def test_only_a_patch_artifact_crosses_the_boundary():
     inv, _ = job_steps("investigate")
     order = list(inv)
     assert order.index("claude") < order.index("package") < order.index("Upload patch artifact")
-    assert "diff" in inv["package"]["run"] and "core.hooksPath=/dev/null" in inv["package"]["run"]
+    pkg = inv["package"]["run"]
+    assert "diff" in pkg and "core.hooksPath=/dev/null" in pkg and ':!.healwright-out' in pkg and "REDACTED" in pkg
+    assert inv["Upload patch artifact"]["with"]["retention-days"] == 1
     # nothing after the AI step in the untrusted job runs in bash or holds a token
     for name in order[order.index("claude") + 1:]:
         s = inv[name]
@@ -90,7 +93,7 @@ def test_trusted_job_validates_then_pushes():
     assert pub["Fresh checkout"]["with"]["persist-credentials"] is False
     scope = pub["scope"]["run"]
     assert "diff --git a/" in scope and "apply" in scope and "--check" in scope and "realpath" in scope
-    assert '".github/", ".claude/", ".git/"' in scope
+    assert '".github/", ".claude/", ".git/", ".healwright-out/"' in scope
     rw = pub["rw-token"]["with"]
     assert rw["permission-contents"] == "write" and rw["permission-pull-requests"] == "write"
     pr = pub["pr"]
@@ -100,6 +103,7 @@ def test_trusted_job_validates_then_pushes():
     assert "Comment when there is no PR" in pub and "add-label" in pub["Comment when there is no PR"]["run"]
     red = pub["summary"]["run"]
     assert "REDACTED" in red and "```text" in red and "[:20000]" in red
+    assert "high_entropy" in red and "ssn" in red and 'replace("`", "\'")' in red
     assert order.index("summary") < order.index("pr")
     assert "Fail the run on a scope violation" in pub
     assert wf["jobs"]["publish"]["env"]["ALLOWED_FOLDER"] == "${{ needs.gate.outputs.allowed_folder }}"
