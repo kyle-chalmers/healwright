@@ -6,7 +6,11 @@ on:
   issues:
     types: [labeled]
 
-permissions: {}
+# The reusable workflow can only DOWNGRADE these; its gate job needs to read the issue with the
+# built-in token, so grant read on contents and issues here.
+permissions:
+  contents: read
+  issues: read
 
 jobs:
   fix:

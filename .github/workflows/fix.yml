@@ -204,12 +204,24 @@ jobs:
           permission-issues: read
           permission-pull-requests: read
 
-      - name: Prepare the summary file
+      # The model gets the issue and the git history as FILES, so it needs no GitHub tool and no
+      # shell git (git log --output=<file> is a write primitive we do not want it to have).
+      - name: Prepare issue text, history, and the summary file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         shell: python -I {0}
         run: |
-          import os
-          os.makedirs(os.environ["OUT_DIR"], exist_ok=True)
-          open(os.path.join(os.environ["OUT_DIR"], "summary.md"), "w").write("NO-FIX\n\n(the agent did not replace this summary)\n")
+          import json, os, subprocess
+          out = os.environ["OUT_DIR"]
+          os.makedirs(out, exist_ok=True)
+          repo, n = os.environ["REPO"], os.environ["ISSUE_NUMBER"]
+          issue = json.loads(subprocess.check_output(["gh", "api", f"repos/{repo}/issues/{n}"]))
+          open(os.path.join(out, "issue.md"), "w", encoding="utf-8").write(
+              f"# Issue #{n}: {issue.get('title','')}\n\n{issue.get('body') or ''}\n")
+          hist = subprocess.run(["git", "log", "--oneline", "-20", "--", os.environ["ALLOWED_FOLDER"]], capture_output=True, text=True).stdout
+          open(os.path.join(out, "history.txt"), "w", encoding="utf-8").write(hist)
+          open(os.path.join(out, "summary.md"), "w").write("NO-FIX\n\n(the agent did not replace this summary)\n")
 
       - name: Claude Code investigates and edits the working tree
         id: claude
@@ -227,8 +239,9 @@ jobs:
             You are the healwright fix agent for a data-jobs repository.
 
             An automated healer detected a CODE_BUG failure and opened issue #${{ inputs.issue_number }}.
-            Read it with the GitHub tools available to you. It contains the failing notebook path,
-            the error output, and a classification.
+            Its full text is in ${{ runner.temp }}/healwright-out/issue.md (read that file; you have
+            no GitHub tools). It contains the failing notebook path, the error output, and a classification.
+            Recent git history for the job folder is in ${{ runner.temp }}/healwright-out/history.txt.
 
             SCOPE (enforced afterwards by a separate trusted job; anything outside is discarded):
             - You may ONLY modify files under: ${{ needs.gate.outputs.allowed_folder }}
@@ -238,10 +251,10 @@ jobs:
             - Do NOT run the notebook or install packages. Read-only diagnostics only.
 
             TASK:
-            1. Read the issue, then the failing notebook: ${{ needs.gate.outputs.notebook_path }}
+            1. Read issue.md, then the failing notebook: ${{ needs.gate.outputs.notebook_path }}
             2. Read the job's own notes in the same folder (claude.md / README) if present.
             3. Read repo conventions: ${{ inputs.context_files }}
-            4. Check recent history: git log --oneline -10 -- <the notebook file>
+            4. Read history.txt for recent changes to the folder.
             5. Determine the root cause. If you can fix it with a minimal change inside the allowed
                folder, make the edit in the working tree.
             6. ALWAYS replace the contents of ${{ runner.temp }}/healwright-out/summary.md (it exists; edit it) with:
@@ -256,7 +269,7 @@ jobs:
           claude_args: >-
             --max-turns ${{ inputs.max_turns }}
             ${{ inputs.model != '' && format('--model {0}', inputs.model) || '' }}
-            --allowed-tools "Read,Grep,Glob,Edit,Bash(git log:*),Bash(git show:*),Bash(git diff:*),Bash(git status:*),Bash(git blame:*),Bash(ls:*),Bash(grep:*),Bash(rg:*),Bash(pip show:*),WebFetch"
+            --allowed-tools "Read,Grep,Glob,Edit(${{ needs.gate.outputs.allowed_folder }}**),Edit(//${{ runner.temp }}/healwright-out/summary.md),Bash(ls:*),Bash(grep:*),Bash(rg:*),Bash(pip show:*),WebFetch"
 
       # From here on this runner may be poisoned (GITHUB_ENV, PATH, hooks, files). Nothing below
       # holds a secret, and the only thing that leaves is the artifact, which `publish` validates.
@@ -378,18 +391,37 @@ jobs:
               print(f"violations<<{delim}\n" + "\n".join(violations) + f"\n{delim}", file=out)
           print("files:", files, "\nviolations:", violations)
 
-      - name: Read summary
+      # The summary is model output from the untrusted job: redact secret/PII shapes, cap its size, and
+      # fence it so nothing in it renders as Markdown, a mention, or a link in the PR or the issue.
+      - name: Redact and fence the agent summary
         id: summary
         if: always()
         shell: python -I {0}
         run: |
-          import os
-          f = os.path.join(os.environ["IN_DIR"], "summary.md")
-          if not os.path.exists(f):
-              os.makedirs(os.environ["IN_DIR"], exist_ok=True)
-              open(f, "w").write("MISSING\n(no summary was produced)\n")
+          import os, re
+          src = os.path.join(os.environ["IN_DIR"], "summary.md")
+          text = open(src, encoding="utf-8", errors="replace").read() if os.path.exists(src) else "MISSING\n(no summary was produced)\n"
+          rules = [
+              (r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----", "[REDACTED:pem]"),
+              (r"xox[baprs]-[0-9A-Za-z-]{10,}", "[REDACTED:slack_token]"),
+              (r"\bgh[pousr]_[A-Za-z0-9]{20,}\b|\bgithub_pat_[A-Za-z0-9_]{20,}\b", "[REDACTED:github_token]"),
+              (r"\bAKIA[0-9A-Z]{16}\b", "[REDACTED:aws_key]"),
+              (r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b", "[REDACTED:jwt]"),
+              (r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[:=]\s*)[^\s\"',;]{4,}", r"\1\2[REDACTED]"),
+              (r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@", r"\1[REDACTED]@"),
+              (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[REDACTED:email]"),
+          ]
+          body = text.split("\n", 1)[1] if "\n" in text else ""
+          for pat, repl in rules:
+              body = re.sub(pat, repl, body)
+          body = re.sub(r"[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]", "", body)[:20000].replace("```", "` ` `")
+          verdict = text.split("\n", 1)[0].strip()[:20]
+          os.makedirs(os.environ["IN_DIR"], exist_ok=True)
+          f = os.path.join(os.environ["IN_DIR"], "summary.fenced.md")
+          open(f, "w", encoding="utf-8").write("```text\n" + body.strip() + "\n```\n")
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
               print(f"path={f}", file=out)
+              print(f"verdict={verdict}", file=out)
 
       - name: Mint write-scoped App token for the trusted steps
         id: rw-token
@@ -428,9 +460,9 @@ jobs:
             echo
             echo "Scope: \`${ALLOWED_FOLDER}\` only (every path validated in a clean job before applying)."
             echo
-            echo "## Agent summary"
+            echo "## Agent summary (redacted, verbatim otherwise)"
             echo
-            tail -n +2 "$SUMMARY_PATH"
+            cat "$SUMMARY_PATH"
             echo
             echo "Closes #${ISSUE_NUMBER}"
           } > "$RUNNER_TEMP/pr-body.md"
@@ -464,10 +496,10 @@ jobs:
               lines += ["The agent finished without a confident fix."]
           summary = ""
           try:
-              summary = "".join(open(e["SUMMARY_PATH"], encoding="utf-8", errors="replace").readlines()[1:])
+              summary = open(e["SUMMARY_PATH"], encoding="utf-8", errors="replace").read()
           except OSError:
               pass
-          lines += ["", "## Agent summary", "", summary[:60000]]
+          lines += ["", "## Agent summary (redacted, verbatim otherwise)", "", summary]
           body_path = os.path.join(e["RUNNER_TEMP"], "healwright-comment.md")
           open(body_path, "w", encoding="utf-8").write("\n".join(lines))
           subprocess.run(["gh", "issue", "comment", e["ISSUE_NUMBER"], "--repo", e["REPO"], "--body-file", body_path], check=True)

@@ -36,7 +36,9 @@ workflow is split into `gate` (folder snapshot from the issue, before the AI), `
 runner, patch paths validated against the snapshot and applied, then push), because runner state
 a model can write during its step (`GITHUB_ENV`, `PATH`, git hooks) is applied to every later
 step in the same job, including the action's own, and a mutable issue body cannot be the authority
-for scope once the AI has run. All actions are SHA-pinned. Lease owner
+for scope once the AI has run. All actions are SHA-pinned; the model's `Edit` is path-scoped and
+it receives the issue and git history as files instead of tools; its summary is redacted and
+fenced before publication; the caller grants the read permissions the gate needs. Lease owner
 tokens guard completion and release; the installer checks the job's effective run-as identity
 and blocks when the healer's permissions cannot be read.
 

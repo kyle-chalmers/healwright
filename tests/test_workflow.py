@@ -47,11 +47,15 @@ def test_untrusted_job_never_holds_any_write_scope():
     assert claude.get("continue-on-error") is True
     assert claude["with"]["show_full_output"] == "${{ inputs.debug_output }}"
     args = claude["with"]["claude_args"]
-    for banned in ("Write", "Bash(gh", "git push", "Bash(git:*)", "Bash(find", "Bash(python3", "Bash(pip install", "Bash(sh", "Bash(bash", "Bash(cat", "Bash(tee", "Bash(echo"):
+    for banned in ("Write", "Bash(gh", "git push", "Bash(git", "Bash(find", "Bash(python3", "Bash(pip install", "Bash(sh", "Bash(bash", "Bash(cat", "Bash(tee", "Bash(echo", "mcp__github"):
         assert banned not in args, banned
-    assert "Bash(git log:*)" in args
+    assert "Edit," not in args and "Edit(${{ needs.gate.outputs.allowed_folder }}**)" in args  # Edit is path-scoped
+    assert "Edit(//${{ runner.temp }}/healwright-out/summary.md)" in args
     assert "CLAUDE_BRANCH" not in str(claude)
     assert "Do NOT push" in claude["with"]["prompt"]
+    assert "issue.md" in claude["with"]["prompt"] and "history.txt" in claude["with"]["prompt"]
+    prep = inv["Prepare issue text, history, and the summary file"]["run"]
+    assert "issue.md" in prep and '"log"' in prep and "gh" in prep
 
 
 def test_only_a_patch_artifact_crosses_the_boundary():
@@ -94,6 +98,9 @@ def test_trusted_job_validates_then_pushes():
     assert "--draft" in pr["run"] and "core.hooksPath=/dev/null" in pr["run"]
     assert pr["env"]["GH_TOKEN"] == "${{ steps.rw-token.outputs.token }}"
     assert "Comment when there is no PR" in pub and "add-label" in pub["Comment when there is no PR"]["run"]
+    red = pub["summary"]["run"]
+    assert "REDACTED" in red and "```text" in red and "[:20000]" in red
+    assert order.index("summary") < order.index("pr")
     assert "Fail the run on a scope violation" in pub
     assert wf["jobs"]["publish"]["env"]["ALLOWED_FOLDER"] == "${{ needs.gate.outputs.allowed_folder }}"
 
@@ -137,6 +144,7 @@ def test_caller_example_is_short_and_points_at_the_reusable_workflow():
     job = wf["jobs"]["fix"]
     assert job["uses"].startswith("kyle-chalmers/healwright/.github/workflows/fix.yml@")
     assert job["if"] == "github.event.label.name == 'self-healing-fix'"
+    assert wf["permissions"] == {"contents": "read", "issues": "read"}
     assert set(job["secrets"]) >= {"app_id", "app_private_key"}
     with open(CALLER, encoding="utf-8") as fh:
         assert len([ln for ln in fh if ln.strip() and not ln.strip().startswith("#")]) <= 25
