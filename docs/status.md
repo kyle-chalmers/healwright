@@ -23,9 +23,10 @@ exactly how to verify it, known gaps by file, and the backlog.
 - Local end-to-end via `templates/healer/healer.py --local --mode simulate`: CODE_BUG produces
   one alert and one issue; a second delivery of the same run reports `done`; a newer success
   posts RESOLVED and resets the streak; TRANSIENT alerts without an issue.
-- Two Codex plan reviews and five read-only Codex code reviews. Every P0/P1 was verified against
+- Two Codex plan reviews and six read-only Codex code reviews. Every P0/P1 was verified against
   the code and either fixed or accepted with a written reason (`CHANGELOG.md`, `docs/guardrails.md`).
-  A sixth pass was started against the final tree and had not reported when this was written.
+  The sixth pass left two P1s (model tool escapes; summary artifact and fence), both fixed in
+  commit e005cfc. No seventh pass has been run.
 - An independent Sonnet audit and a private literal denylist scan found no organisation- or
   financial-services-specific content. Maintainer identity is intentionally public.
 - GitHub accepts `fix.yml` (an earlier revision was rejected for `runner.temp` in job-level `env`;
