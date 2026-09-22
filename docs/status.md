@@ -64,9 +64,9 @@ jobs repo first.
    discard it, comment, add `needs-human`, and fail the run.
 7. Things most likely to break, in order:
    - **Claude Code permission-rule syntax** in `--allowed-tools`: `Edit(<folder>**)` and
-     `Edit(//<absolute path>)`. If the syntax is wrong the model either cannot edit (it will say so
-     in `summary.md`) or edits unscoped (still confined by `publish`). Check the current Claude
-     Code permissions docs and adjust `fix.yml` line with `--allowed-tools`.
+     `Edit(.healwright-out/summary.md)` (repo-relative; the documented form per the sixth review).
+     `--disallowedTools` must actually remove `Bash`; if the model reports it cannot read files,
+     check that `Read`/`Grep`/`Glob` survived. Either failure is safe: `publish` confines what gets committed.
    - `anthropics/claude-code-action` behaviour with a token that is **read-only on every scope**.
      If it hard-fails before the model runs, grant `issues: read` only (already) and see whether
      `pull-requests: read` is required; do not grant any write scope in `investigate`.
