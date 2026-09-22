@@ -178,10 +178,13 @@ jobs:
     outputs:
       claude_outcome: ${{ steps.claude.outcome }}
     env:
-      OUT_DIR: ${{ runner.temp }}/healwright-out
       ALLOWED_FOLDER: ${{ needs.gate.outputs.allowed_folder }}
       NOTEBOOK_PATH: ${{ needs.gate.outputs.notebook_path }}
     steps:
+      # `runner.temp` is not available in job-level env, so the scratch dir is set here (before the AI).
+      - name: Set scratch directory
+        shell: bash
+        run: echo "OUT_DIR=${RUNNER_TEMP}/healwright-out" >> "$GITHUB_ENV"
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -309,7 +312,6 @@ jobs:
       contents: read
       issues: read
     env:
-      IN_DIR: ${{ runner.temp }}/healwright-in
       # Authority for scope comes from `gate`, computed before the AI ran. Never from `investigate`,
       # never from the (mutable) issue after the fact.
       ISSUE_OK: ${{ needs.gate.outputs.ok }}
@@ -317,6 +319,9 @@ jobs:
       ALLOWED_FOLDER: ${{ needs.gate.outputs.allowed_folder }}
       CLAUDE_OUTCOME: ${{ needs.investigate.outputs.claude_outcome }}
     steps:
+      - name: Set scratch directory
+        shell: bash
+        run: echo "IN_DIR=${RUNNER_TEMP}/healwright-in" >> "$GITHUB_ENV"
       - name: Fresh checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:

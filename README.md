@@ -119,6 +119,8 @@ cancel; whether a Run Job task mirrors its child's result; whether the opt-in pr
 restores `FAILED`; Delta state backend under two concurrent writers. Run shadow mode beside any
 existing monitor before trusting it.
 
+Hand-off and open verification items: `docs/STATUS-2026-09-21.md`.
+
 Backlog: webhook relay code (documented in `docs/triggers.md`), Snowflake state backend, Airflow
 and Dagster adapters, weekly recap, `tools/audit_jobs.py`.
 
