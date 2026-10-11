@@ -27,11 +27,16 @@ only the throwaway test jobs go live, while every real job stays in shadow.
 1. Copy `config.yaml` to `config.rehearsal.yaml` beside it and change four things:
    `policy.shadow: false`; `healer_job_name: healwright-healer-rehearsal` (and `healer_job_id`
    once the job exists); `jobs.include` set to the test job names only; and
-   `state.delta_schema` set to a separate schema, so rehearsal streaks never mix with real ones. Point `slack.channel` at a test channel. Keep
-   `github.repo` as your real jobs repo: the fix pipeline is what you are testing.
+   `state.delta_schema` set to a separate schema, so rehearsal streaks never mix with real ones.
+   Point `slack.channel` at a test channel. Keep `github.repo` as your real jobs repo: the fix
+   pipeline is what you are testing.
 2. Create a second job from `healer_job.json` named `healwright-healer-rehearsal`, with the
-   `config_path` parameter's default set to the path of `config.rehearsal.yaml`, and its schedule
-   paused (the main healer's reconciler stays the safety net).
+   `config_path` parameter's default set to the path of `config.rehearsal.yaml`. Keep its hourly
+   schedule on: the leaf task only fires on failure, so the scheduled `mode=reconcile` run is what
+   sees a test job's success (item 17's RESOLVED message and streak reset) and posts the
+   follow-up after the fix workflow finishes (item 22). `jobs.include` limits it to the test
+   jobs. To skip the wait, start the rehearsal job by hand with `mode=reconcile` after the
+   success run and after the fix workflow completes.
 3. Re-install the trigger on the test jobs only, pointing at the rehearsal healer:
    `--uninstall --apply` with the main healer id, then a dry run and `--apply` with
    `--healer-job-id` set to the rehearsal job's id. Real jobs keep calling the main healer. The
