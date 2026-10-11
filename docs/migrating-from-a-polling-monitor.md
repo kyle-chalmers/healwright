@@ -28,6 +28,8 @@ either a pattern to port or a bug to fix; both are cheap while nothing is posted
 Point the healer at the channel, switch shadow off, and at the same time reduce the old monitor to
 observe-only into its own tables, or retire it and rely on the healer's `mode=reconcile` schedule.
 Two alerting systems at once is the one state to avoid.
+Switch only after the sign-off in `docs/live-validation-checklist.md`: its stage B rehearses
+the posting paths and the fix pipeline on a throwaway job while your real jobs stay in shadow.
 
 ## 5. Move state consumers
 

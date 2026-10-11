@@ -25,6 +25,34 @@ First public cut of the methodology and reference kit.
   lacked `gh`.
 - **Three skills** (`self-healing-audit`, `self-healing-build`, `self-healing-install-trigger`)
   that carry a team through the methodology. Pain: the knowledge lived in one org's runbook.
+- **Skills that explain themselves and find where you are** (adapted from the StreamSnow plugin's
+  onboarding): each skill opens with a narration contract (what and why before each action, the
+  result after, every question names what it decides), starts by detecting what already exists
+  and skipping it; build and install-trigger list the steps only a human can do, with the reason. The audit now stops
+  for the human to confirm every REVIEW and side-effecting job before `JOB_AUDIT.md` is written.
+  Skill descriptions now match the README's step numbers (1, 3a, 3b), and
+  `self-healing-install-trigger` can write the checklist answers it asks for and applies with
+  `--apply --yes` after an explicit yes in chat (the installer's prompt needs a terminal the agent
+  does not have). Pain: a newcomer
+  could not tell which step they were on, what a skill was about to do, or which of its
+  decisions were theirs, and the riskiest call (is this job safe to retry?) reached the next
+  step without a human reading it.
+- **Glossary, troubleshooting, and a worked example** (`docs/glossary.md`,
+  `docs/troubleshooting.md`, `examples/JOB_AUDIT.example.md`), plus expected output for the
+  quick start, a "Is this for you?" list, a prerequisites table, and project-scope install
+  commands in the README. Pain: the docs used a dozen terms nowhere defined, and the healer's own
+  `notes` and the installer's WARN/ERROR lines had no lookup from message to cause to fix.
+- **Staged live validation** (`docs/live-validation-checklist.md`): stage A in shadow mode,
+  stage B a rehearsal where a second healer job posts for the throwaway test jobs only, stage C
+  the sign-off. Pain: the sign-off required a RESOLVED post, an issue body and the fix pipeline
+  to be green before shadow mode was off, which shadow mode makes impossible, so a team either
+  went live unvalidated or could never sign off. Also: step 2 (native retries) now has a how-to
+  in the README, and `/self-healing-build` checks the tiers landed before it starts. Pain: the
+  one step without a skill said only "your deploy path", and nothing caught a skipped retry tier.
+- **Skill-surface tests and plugin validation in CI** (`tests/test_skills.py`, `plugin-validate`
+  job with a negative control). Pain: the gate only checked that each skill ended in `## Next`,
+  so a broken frontmatter, a dead doc pointer, or a skill losing its human checkpoint would ship
+  green.
 
 Reviewed before release by two independent read-only passes (a Codex code review and a separate
 organisation-leak audit); the P0/P1 findings are folded in: the leaf trigger now builds incidents
