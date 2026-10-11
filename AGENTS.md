@@ -33,7 +33,10 @@ When a change is ambiguous, these decide it:
 8. **Say what is verified live and what is not.** README Status and
    `docs/live-validation-checklist.md` are honest. Platform semantics we could not verify from
    docs are listed as open, not assumed.
-9. **Every skill ends by naming the next one** (`## Next`). `bin/selftest.sh` checks.
+9. **Every skill ends by naming the next one** (`## Next`). `bin/selftest.sh` checks. Every skill
+   also says what and why before it acts and finds where the user is before step 1; build and
+   install-trigger name what only the human can do, and the audit stops for the human before it
+   writes. `tests/test_skills.py` checks.
 
 ## The gate
 
@@ -57,5 +60,5 @@ before every commit; CI runs it on Python 3.10 to 3.12.
 - `templates/healer/healwright_core.py`: models, classifier, redaction, stores, clients, `Healer`.
 - `templates/healer/healer.py`: notebook and local CLI entrypoint. `propagate.py`: the opt-in raise task.
 - `tools/install_trigger.py`: adds/removes the leaf task on live jobs (dry-run default).
-- `.github/workflows/fix.yml`: the reusable fix workflow; `examples/caller-workflow.yml` shows the 15-line caller.
-- `skills/`: the three-step methodology as Claude Code skills. `docs/`: architecture, triggers, guardrails, lessons, live checklist, migration.
+- `.github/workflows/fix.yml`: the reusable fix workflow; `examples/caller-workflow.yml` shows the short caller.
+- `skills/`: the three-step methodology as Claude Code skills. `docs/`: glossary, troubleshooting, architecture, triggers, guardrails, lessons, live checklist, migration.

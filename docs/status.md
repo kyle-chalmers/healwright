@@ -8,17 +8,17 @@ exactly how to verify it, known gaps by file, and the backlog.
 
 | Piece | Path | State |
 |---|---|---|
-| Methodology | `README.md`, `docs/architecture.md`, `docs/triggers.md`, `docs/guardrails.md`, `docs/lessons.md`, `docs/migrating-from-a-polling-monitor.md` | complete for v0.1 |
+| Methodology | `README.md`, `docs/glossary.md`, `docs/troubleshooting.md`, `docs/architecture.md`, `docs/triggers.md`, `docs/guardrails.md`, `docs/lessons.md`, `docs/migrating-from-a-polling-monitor.md` | complete for v0.1 |
 | Copyable healer | `templates/healer/` (`healwright_core.py`, `healer.py`, `propagate.py`, `patterns.yaml`, `config.example.yaml`, `healer_job.json`) | complete; SQLite tested, Delta implemented but never run |
 | Installer | `tools/install_trigger.py` | complete; offline mode tested, live mode never run against a workspace |
 | Reusable fix workflow | `.github/workflows/fix.yml` + `examples/caller-workflow.yml` | complete; parses on GitHub; **never executed end to end** |
-| Skills | `skills/self-healing-{audit,build,install-trigger}/SKILL.md` + `.claude-plugin/` | complete; never validated with `claude plugin validate` |
+| Skills | `skills/self-healing-{audit,build,install-trigger}/SKILL.md` + `.claude-plugin/` | complete; `claude plugin validate --strict` passes locally (CLI 2.1.296); CI job added, not yet run on GitHub |
 | Gate | `bin/selftest.sh`, `bin/leak_scan.py`, `.github/workflows/ci.yml` | green on `main` |
-| Tests | `tests/` (100 cases) | green |
+| Tests | `tests/` (129 cases, incl. `test_skills.py`) | green |
 
 ## Verified
 
-- `bash bin/selftest.sh`: ruff, 100 pytest cases, standalone template import, offline installer
+- `bash bin/selftest.sh`: ruff, 129 pytest cases, standalone template import, offline installer
   dry run, shape-based leak scan, skill surface, zizmor (every action SHA-pinned).
 - Local end-to-end via `templates/healer/healer.py --local --mode simulate`: CODE_BUG produces
   one alert and one issue; a second delivery of the same run reports `done`; a newer success
@@ -76,8 +76,11 @@ jobs repo first.
 
 ### 2. Live Databricks matrix (`docs/live-validation-checklist.md`)
 
-Nothing in the trigger design has been exercised in a workspace. Items 1 to 3 and 14 to 17 in
-that checklist are the minimum before switching `policy.shadow` off anywhere. The open
+Nothing in the trigger design has been exercised in a workspace. The checklist runs in three
+stages: shadow (A), a rehearsal where a second healer posts for the test jobs only (B), then
+sign-off (C). Items 1 to 3 and 14 to 16 in stage A and 17 and 20 to 23 in stage B are the
+minimum before switching `policy.shadow` off on the main healer. The rehearsal relies on the
+job-level `config_path` default applying when the leaf task does not pass it; unverified. The open
 semantics are listed in `docs/triggers.md` under "still to confirm live".
 
 ### 3. Delta state backend
@@ -98,9 +101,19 @@ appears in the UI with `depends_on` = every task and `run_if` = At least one fai
 
 ### 5. Plugin manifest
 
-Run `claude plugin validate .claude-plugin/marketplace.json --strict` and
-`claude plugin validate .claude-plugin/plugin.json --strict` (pinned Claude Code CLI). Not yet
-done; the skills are plain Markdown and work by copy regardless.
+`claude plugin validate .claude-plugin/plugin.json --strict` and the same for
+`marketplace.json` pass locally on Claude Code CLI 2.1.296, and a skill with broken frontmatter
+fails as it should. The `plugin-validate` CI job pins CLI 2.1.258 and has not run on GitHub yet;
+if that version is unavailable or validates differently, bump the pin and its version check
+together. The skills are plain Markdown and work by copy regardless.
+
+### 6. Skills with a newcomer
+
+`tests/test_skills.py` proves the skill text carries the narration contract, the "find where you
+are" step, the human-only lists and the audit checkpoint. It cannot prove a newcomer finds them
+clear. Test procedure: someone who has not read this repo runs `/self-healing-audit` on a jobs
+repo with Claude Code and notes every point where they did not know what was happening or what
+came next.
 
 ## Known gaps by file
 

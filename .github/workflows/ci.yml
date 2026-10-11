@@ -45,3 +45,50 @@ jobs:
         run: |
           pip install zizmor
           zizmor --min-severity medium .github/workflows
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      # The pinned CLI requires Node 22 or later; do not depend on the runner image's default.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      # Pinned: this step runs the package and its install scripts inside CI. Bump the version
+      # and the check below together, deliberately.
+      - name: Install Claude Code CLI (pinned)
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.258
+          installed="$(claude --version)"
+          case "$installed" in
+            2.1.258*) echo "claude $installed" ;;
+            *) echo "::error::Expected claude 2.1.258, got '$installed'"; exit 1 ;;
+          esac
+      # This repo is both a plugin and a one-plugin marketplace. Validating "." resolves to
+      # marketplace.json and never reads the skills, so each manifest is named explicitly.
+      - name: Marketplace manifest (strict)
+        run: claude plugin validate .claude-plugin/marketplace.json --strict
+      - name: Plugin manifest and skills (strict)
+        run: claude plugin validate .claude-plugin/plugin.json --strict
+      # Negative control: if a skill with broken frontmatter passes, the step above has stopped
+      # reading skills and its green tick means nothing. Runs on a throwaway copy of the tree.
+      - name: "Negative control: a broken skill must fail validation"
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          git archive HEAD | tar -x -C "$tmp"
+          victim="$(find "$tmp/skills" -type f -name SKILL.md | sort | head -n 1)"
+          printf -- '---\ndescription: Intentionally malformed.\nname [NO COLON, so YAML must reject this line\n---\n' > "$victim"
+          out="$tmp/validate.out"
+          if claude plugin validate "$tmp/.claude-plugin/plugin.json" --strict >"$out" 2>&1; then
+            echo "::error::Negative control passed: the validate step is not reading skill content."
+            cat "$out"; exit 1
+          fi
+          grep -qF "${victim#"$tmp"/}" "$out" && grep -qiE 'frontmatter|yaml' "$out" || {
+            echo "::error::Validation failed for some other reason than the broken skill."
+            cat "$out"; exit 1
+          }
+          echo "Negative control OK: the broken skill was rejected by name."
