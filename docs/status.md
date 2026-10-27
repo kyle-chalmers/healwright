@@ -12,7 +12,7 @@ exactly how to verify it, known gaps by file, and the backlog.
 | Copyable healer | `templates/healer/` (`healwright_core.py`, `healer.py`, `propagate.py`, `patterns.yaml`, `config.example.yaml`, `healer_job.json`) | complete; SQLite tested, Delta implemented but never run |
 | Installer | `tools/install_trigger.py` | complete; offline mode tested, live mode never run against a workspace |
 | Reusable fix workflow | `.github/workflows/fix.yml` + `examples/caller-workflow.yml` | complete; parses on GitHub; **never executed end to end** |
-| Skills | `skills/self-healing-{audit,build,install-trigger}/SKILL.md` + `.claude-plugin/` | complete; `claude plugin validate --strict` passes locally (CLI 2.1.296); CI job added, not yet run on GitHub |
+| Skills | `skills/self-healing-{audit,build,install-trigger}/SKILL.md` + `.claude-plugin/` | complete; `claude plugin validate --strict` passes locally (CLI 2.1.296) and in CI |
 | Gate | `bin/selftest.sh`, `bin/leak_scan.py`, `.github/workflows/ci.yml` | green on `main` |
 | Tests | `tests/` (129 cases, incl. `test_skills.py`) | green |
 
@@ -103,9 +103,9 @@ appears in the UI with `depends_on` = every task and `run_if` = At least one fai
 
 `claude plugin validate .claude-plugin/plugin.json --strict` and the same for
 `marketplace.json` pass locally on Claude Code CLI 2.1.296, and a skill with broken frontmatter
-fails as it should. The `plugin-validate` CI job pins CLI 2.1.258 and has not run on GitHub yet;
-if that version is unavailable or validates differently, bump the pin and its version check
-together. The skills are plain Markdown and work by copy regardless.
+fails as it should. The `plugin-validate` CI job pins CLI 2.1.258 and passed on GitHub with #1
+(2026-10-11); if that version becomes unavailable or validates differently, bump the pin and its
+version check together. The skills are plain Markdown and work by copy regardless.
 
 ### 6. Skills with a newcomer
 
@@ -153,6 +153,8 @@ python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements-dev
 bash bin/selftest.sh
 HEALWRIGHT_LEAK_DENYLIST=~/.config/healwright-denylist.txt bash bin/selftest.sh   # private denylist, never committed
 ```
+
+Release steps, and why the `v0.1.0` tag, `v1` and the CHANGELOG disagree today: `RELEASING.md`.
 
 Before any release: an independent read-only review (for example
 `codex exec --sandbox read-only --skip-git-repo-check "<review prompt>" < /dev/null`) and a
