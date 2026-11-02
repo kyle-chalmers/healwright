@@ -1422,6 +1422,15 @@ def _field(value: Any, redactor: Callable[[str | None], str], max_length: int = 
     return text.replace("`", "'").replace("|", "/").replace("\n", " ").replace("<", "‹").replace(">", "›")
 
 
+def _path_field(value: Any, redactor: Callable[[str | None], str], max_length: int = 300) -> str:
+    """`_field` for a path, one segment at a time. Redacted whole, an ordinary long path such as
+    `jobs/Daily_Sales_Rollup/01_extract_Orders` reads as one high-entropy token and is replaced,
+    and the fix workflow reads the job folder back from the issue's Notebook Path row."""
+    if value in (None, ""):
+        return "n/a"
+    return "/".join(_field(seg, redactor, max_length) if seg else "" for seg in sanitize(str(value), max_length).split("/"))
+
+
 def format_alert(incident: RunIncident, cls: Classification, consecutive: int, affected: list[JobState] | None,
                  escalation_threshold: int, redactor: Callable[[str | None], str]) -> str:
     job = _field(incident.job_name, redactor)
@@ -1477,7 +1486,7 @@ def format_issue(incident: RunIncident, cls: Classification, consecutive: int, t
                  include_raw_trace: bool, redactor: Callable[[str | None], str]) -> tuple[str, str]:
     """Title and body for the fix-pipeline issue. Body fields are an allowlist; traces are redacted
     and included only when the config opts in."""
-    nb = _field(incident.effective_notebook_path or "unknown", redactor, 300)
+    nb = _path_field(incident.effective_notebook_path or "unknown", redactor)
     task = _field(incident.primary_task.task_key, redactor) if incident.primary_task else "n/a"
     job = _field(incident.job_name, redactor)
     summary = _field((cls.pattern or "unknown error")[:80], redactor)
@@ -1774,11 +1783,15 @@ class Healer:
         # started before the last sweep and finished after it would be missed by a pure
         # watermark. Reach back far enough to cover the longest run you expect (max_run_hours).
         reach = dt.timedelta(hours=float(rc.get("max_run_hours", 24)))
+        cap = dt.timedelta(minutes=int(rc.get("max_window_minutes", 1440 * 3)))
         if wm is None:
             start = now - max(reach, dt.timedelta(minutes=int(rc.get("initial_lookback_minutes", 120))))
+            end = min(now, start + cap)
         else:
             start = wm - max(reach, dt.timedelta(minutes=int(rc.get("overlap_minutes", 30))))
-        end = min(now, start + dt.timedelta(minutes=int(rc.get("max_window_minutes", 1440 * 3))))
+            # The cap is how far one sweep moves the watermark, so it counts from the watermark. Counted
+            # from `start`, a reach-back as long as the cap (max_run_hours: 72) pinned it in place forever.
+            end = min(now, wm + cap)
         items = list(self.platform.list_completed_runs(int(start.timestamp() * 1000), int(end.timestamp() * 1000)))
         successes = sorted([i for i in items if isinstance(i, RunSuccess)], key=lambda i: i.run_start_time or now)
         incidents = sorted([i for i in items if isinstance(i, RunIncident)], key=lambda i: i.run_start_time or now)

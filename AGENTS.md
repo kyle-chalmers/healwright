@@ -41,8 +41,8 @@ When a change is ambiguous, these decide it:
 ## The gate
 
 `bash bin/selftest.sh` is THE gate: ruff, pytest, the template's standalone import, an offline
-installer dry run, the shape-based leak scan, the skill surface, and zizmor when installed. Run it
-before every commit; CI runs it on Python 3.10 to 3.12.
+installer dry run, the shape-based leak scan, the skill surface, and zizmor and actionlint when
+installed. Run it before every commit; CI runs it on Python 3.10 to 3.12.
 
 ## Ground rules for changes
 

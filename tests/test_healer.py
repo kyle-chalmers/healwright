@@ -1,4 +1,6 @@
 import datetime as dt
+import os
+import re
 
 import healwright_core as hw
 from conftest import make_incident, make_success
@@ -235,6 +237,23 @@ def test_reconcile_reaches_back_for_long_running_jobs(cfg, store, clock):
     assert [r.outcome for r in results] == ["handled"]
 
 
+
+def test_reconcile_watermark_advances_when_reach_back_equals_the_cap(cfg, store, clock):
+    # max_run_hours: 72 with the default 72h cap once pinned the watermark: each sweep ended exactly
+    # where the last one did, so runs that started after it were never listed again.
+    cfg["reconcile"] = {"overlap_minutes": 30, "initial_lookback_minutes": 120, "max_window_minutes": 4320, "max_run_hours": 72}
+    plat = FakePlatform([])
+    h, rec = build(cfg, store, clock, platform=plat)
+    h.run_reconcile()
+    clock.tick(hours=2)
+    plat.items.append(make_incident(run_id=11, start=clock() - dt.timedelta(minutes=30), end=clock()))
+    assert [r.outcome for r in h.run_reconcile()] == ["handled"]
+    assert hw.parse_iso(store.get_watermark("reconcile_end")) == clock()
+    # a long backlog still moves forward one cap at a time
+    store.set_watermark("reconcile_end", hw.iso(clock() - dt.timedelta(days=10)), clock())
+    h.run_reconcile()
+    assert hw.parse_iso(store.get_watermark("reconcile_end")) == clock() - dt.timedelta(days=7)
+
 def test_leaf_task_with_only_sentinel_failure_is_nothing_to_do(cfg, store, clock):
     inc = make_incident(run_id=7, tasks=False, result_state="SUCCESS_WITH_FAILURES")
     inc.tasks.append(hw.TaskFailure(hw.PROPAGATE_TASK_KEY, "FAILED", 1, "boom"))
@@ -320,6 +339,23 @@ def test_platform_controlled_fields_are_redacted_and_neutralised(cfg, store, clo
     assert "someone@example.com" not in text and "someone@example.com" not in issue["title"] and "someone@example.com" not in issue["body"]
     assert "`x`" not in issue["body"] and "<script>" not in issue["body"]
 
+
+
+def test_long_notebook_path_reaches_the_fix_workflow_intact(cfg, store, clock):
+    # Redacted as one string, an ordinary long path is a single high-entropy token: the issue said
+    # [REDACTED:high_entropy] and fix.yml's gate could not derive the job folder from it.
+    nb = "jobs/Daily_Sales_Rollup/01_extract_Orders"
+    assert hw.redact(nb) != nb  # the trap this guards against
+    h, rec = build(cfg, store, clock)
+    h.handle(make_incident(notebook=nb, end=clock()))
+    body = issue_posts(rec)[0]["body"]["body"]
+    fix_yml = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "fix.yml")
+    with open(fix_yml, encoding="utf-8") as fh:
+        gate_rx = re.search(r'm = re\.search\(r"(.+?)", body\)', fh.read()).group(1)
+    assert re.search(gate_rx, body).group(1) == nb
+    # every segment is still redacted on its own
+    secretish = "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"
+    assert hw._path_field(f"/Users/someone@example.com/{secretish}/nb", hw.redact) == "/Users/[REDACTED:email]/[REDACTED:high_entropy]/nb"
 
 class _Obj:
     def __init__(self, **kw):

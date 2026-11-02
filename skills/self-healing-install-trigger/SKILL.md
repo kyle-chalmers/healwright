@@ -66,7 +66,8 @@ in `docs/glossary.md`, and installer messages and their fixes are in `docs/troub
    python tools/install_trigger.py --profile <p> --healer-job-id <id> --job-id <a> --apply --yes
    ```
    A pre-change backup of each definition lands in `.healwright-backups/` (gitignored). Tell the
-   user where, and that `--uninstall --apply` reverses the change.
+   user where, and that `--uninstall` reverses the change (dry run first, then `--apply --yes`
+   after a yes in chat, the same way).
 5. **Validate in shadow mode** with the throwaway test job described at the top of
    `docs/live-validation-checklist.md` (task `a` fails on purpose, task `b` depends on it). Ask
    before creating it; it is a new job in their workspace. Install the trigger on it the same way,
@@ -94,7 +95,10 @@ shadow mode is off by an explicit decision.
 
 ## Next
 
-- Uninstall or re-run at any time: `python tools/install_trigger.py --profile <p> --job-id <a> --healer-job-id <id> --uninstall --apply`.
+- Uninstall at any time, the same way as step 4: dry-run
+  `python tools/install_trigger.py --profile <p> --job-id <a> --healer-job-id <id> --uninstall`, show the
+  diff, and after an explicit yes in chat run it again with `--apply --yes`. Without `--yes` the
+  installer refuses in the agent's shell. Re-run this skill to add jobs or change flags.
 - Step 4 of the methodology is the caller workflow from `/self-healing-build`; watch the first
   CODE_BUG issue go through it (`docs/live-validation-checklist.md` items 20 to 23).
 - New jobs: run `/self-healing-audit` on the additions, then this skill again.

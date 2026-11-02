@@ -61,5 +61,5 @@ github:
 reconcile:
   overlap_minutes: 30              # re-scan this much before the last sweep end
   initial_lookback_minutes: 120    # first sweep when no watermark exists
-  max_window_minutes: 4320         # cap per sweep; the next sweep continues from the watermark
+  max_window_minutes: 4320         # how far one sweep moves the watermark; a backlog continues next sweep
   max_run_hours: 24                # reach back this far before the watermark: the API filters on START time
