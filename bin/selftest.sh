@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # healwright self-test: THE gate. Run before every commit; CI runs it on three Python versions.
 #   ruff -> pytest -> import check of the copyable template -> leak scan -> skill surface checks
+#   -> zizmor and actionlint on the workflows, when installed
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,6 +46,15 @@ elif "$PY" -c "import zizmor" 2>/dev/null; then
   "$PY" -m zizmor --min-severity medium .github/workflows || { echo "FAIL: zizmor"; exit 1; }
 else
   echo "    zizmor not installed; skipped locally (CI runs it)"
+fi
+
+echo "==> workflow lint (actionlint, if installed)"
+AL="$(dirname "$PY")/actionlint"
+[ -x "$AL" ] || AL="$(command -v actionlint || true)"
+if [ -n "$AL" ]; then
+  "$AL" || { echo "FAIL: actionlint"; exit 1; }
+else
+  echo "    actionlint not installed; skipped locally (CI runs it; pip install actionlint-py)"
 fi
 
 echo "OK: healwright selftest passed"

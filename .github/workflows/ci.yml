@@ -45,6 +45,13 @@ jobs:
         run: |
           pip install zizmor
           zizmor --min-severity medium .github/workflows
+      # actionlint checks which contexts each expression may use, plus shellcheck on run scripts.
+      # That is the mistake GitHub rejected on the v0.1.0 tag (`runner.temp` in job-level env);
+      # nothing else in CI checks for it. Pinned; bump deliberately.
+      - name: actionlint
+        run: |
+          pip install actionlint-py==1.7.12.25
+          actionlint
 
   plugin-validate:
     runs-on: ubuntu-latest
@@ -87,8 +94,8 @@ jobs:
             echo "::error::Negative control passed: the validate step is not reading skill content."
             cat "$out"; exit 1
           fi
-          grep -qF "${victim#"$tmp"/}" "$out" && grep -qiE 'frontmatter|yaml' "$out" || {
+          if ! { grep -qF "${victim#"$tmp"/}" "$out" && grep -qiE 'frontmatter|yaml' "$out"; }; then
             echo "::error::Validation failed for some other reason than the broken skill."
             cat "$out"; exit 1
-          }
+          fi
           echo "Negative control OK: the broken skill was rejected by name."
