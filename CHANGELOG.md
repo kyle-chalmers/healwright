@@ -53,6 +53,15 @@ First public cut of the methodology and reference kit.
   job with a negative control). Pain: the gate only checked that each skill ended in `## Next`,
   so a broken frontmatter, a dead doc pointer, or a skill losing its human checkpoint would ship
   green.
+- **Fixes from a November quality pass.** The issue's Notebook Path is redacted one segment at a
+  time. Pain: an ordinary long path (`jobs/Daily_Sales_Rollup/01_extract_Orders`) matched the
+  high-entropy rule, so `fix.yml` could not find the job folder and every such issue went to
+  `needs-human`. The reconciler's per-sweep cap now counts from the watermark. Pain: with
+  `max_run_hours` as long as the cap, the watermark never advanced and the safety net silently
+  stopped listing new runs. `fix.yml`'s `investigate` job checks out `base_branch` like the other
+  two. Pain: with a non-default base branch the model read one branch and the patch was applied to
+  another. CI runs actionlint. Pain: nothing in CI checked which contexts an expression may use,
+  the mistake GitHub rejected on the `v0.1.0` tag.
 
 Reviewed before release by two independent read-only passes (a Codex code review and a separate
 organisation-leak audit); the P0/P1 findings are folded in: the leaf trigger now builds incidents
