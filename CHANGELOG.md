@@ -53,6 +53,12 @@ First public cut of the methodology and reference kit.
   job with a negative control). Pain: the gate only checked that each skill ended in `## Next`,
   so a broken frontmatter, a dead doc pointer, or a skill losing its human checkpoint would ship
   green.
+- **Fix pipeline results from a live run** (README Status, `docs/status.md` section 1, checklist
+  items 20 to 24): `fix.yml@v1` ran end to end in a private sandbox, covering the success, no-fix,
+  scope-bait and double-label cases, with what is still open stated (the healer follow-up, and
+  `publish`'s path check against a real out-of-scope patch). Pain: the docs said the fix workflow
+  had never run, so an adopter could not tell whether it worked at all, or which guarantees
+  rested only on offline tests.
 
 Reviewed before release by two independent read-only passes (a Codex code review and a separate
 organisation-leak audit); the P0/P1 findings are folded in: the leaf trigger now builds incidents
