@@ -237,6 +237,23 @@ def test_reconcile_reaches_back_for_long_running_jobs(cfg, store, clock):
     assert [r.outcome for r in results] == ["handled"]
 
 
+
+def test_reconcile_watermark_advances_when_reach_back_equals_the_cap(cfg, store, clock):
+    # max_run_hours: 72 with the default 72h cap once pinned the watermark: each sweep ended exactly
+    # where the last one did, so runs that started after it were never listed again.
+    cfg["reconcile"] = {"overlap_minutes": 30, "initial_lookback_minutes": 120, "max_window_minutes": 4320, "max_run_hours": 72}
+    plat = FakePlatform([])
+    h, rec = build(cfg, store, clock, platform=plat)
+    h.run_reconcile()
+    clock.tick(hours=2)
+    plat.items.append(make_incident(run_id=11, start=clock() - dt.timedelta(minutes=30), end=clock()))
+    assert [r.outcome for r in h.run_reconcile()] == ["handled"]
+    assert hw.parse_iso(store.get_watermark("reconcile_end")) == clock()
+    # a long backlog still moves forward one cap at a time
+    store.set_watermark("reconcile_end", hw.iso(clock() - dt.timedelta(days=10)), clock())
+    h.run_reconcile()
+    assert hw.parse_iso(store.get_watermark("reconcile_end")) == clock() - dt.timedelta(days=7)
+
 def test_leaf_task_with_only_sentinel_failure_is_nothing_to_do(cfg, store, clock):
     inc = make_incident(run_id=7, tasks=False, result_state="SUCCESS_WITH_FAILURES")
     inc.tasks.append(hw.TaskFailure(hw.PROPAGATE_TASK_KEY, "FAILED", 1, "boom"))

@@ -1783,11 +1783,15 @@ class Healer:
         # started before the last sweep and finished after it would be missed by a pure
         # watermark. Reach back far enough to cover the longest run you expect (max_run_hours).
         reach = dt.timedelta(hours=float(rc.get("max_run_hours", 24)))
+        cap = dt.timedelta(minutes=int(rc.get("max_window_minutes", 1440 * 3)))
         if wm is None:
             start = now - max(reach, dt.timedelta(minutes=int(rc.get("initial_lookback_minutes", 120))))
+            end = min(now, start + cap)
         else:
             start = wm - max(reach, dt.timedelta(minutes=int(rc.get("overlap_minutes", 30))))
-        end = min(now, start + dt.timedelta(minutes=int(rc.get("max_window_minutes", 1440 * 3))))
+            # The cap is how far one sweep moves the watermark, so it counts from the watermark. Counted
+            # from `start`, a reach-back as long as the cap (max_run_hours: 72) pinned it in place forever.
+            end = min(now, wm + cap)
         items = list(self.platform.list_completed_runs(int(start.timestamp() * 1000), int(end.timestamp() * 1000)))
         successes = sorted([i for i in items if isinstance(i, RunSuccess)], key=lambda i: i.run_start_time or now)
         incidents = sorted([i for i in items if isinstance(i, RunIncident)], key=lambda i: i.run_start_time or now)
