@@ -1422,6 +1422,15 @@ def _field(value: Any, redactor: Callable[[str | None], str], max_length: int = 
     return text.replace("`", "'").replace("|", "/").replace("\n", " ").replace("<", "‹").replace(">", "›")
 
 
+def _path_field(value: Any, redactor: Callable[[str | None], str], max_length: int = 300) -> str:
+    """`_field` for a path, one segment at a time. Redacted whole, an ordinary long path such as
+    `jobs/Daily_Sales_Rollup/01_extract_Orders` reads as one high-entropy token and is replaced,
+    and the fix workflow reads the job folder back from the issue's Notebook Path row."""
+    if value in (None, ""):
+        return "n/a"
+    return "/".join(_field(seg, redactor, max_length) if seg else "" for seg in sanitize(str(value), max_length).split("/"))
+
+
 def format_alert(incident: RunIncident, cls: Classification, consecutive: int, affected: list[JobState] | None,
                  escalation_threshold: int, redactor: Callable[[str | None], str]) -> str:
     job = _field(incident.job_name, redactor)
@@ -1477,7 +1486,7 @@ def format_issue(incident: RunIncident, cls: Classification, consecutive: int, t
                  include_raw_trace: bool, redactor: Callable[[str | None], str]) -> tuple[str, str]:
     """Title and body for the fix-pipeline issue. Body fields are an allowlist; traces are redacted
     and included only when the config opts in."""
-    nb = _field(incident.effective_notebook_path or "unknown", redactor, 300)
+    nb = _path_field(incident.effective_notebook_path or "unknown", redactor)
     task = _field(incident.primary_task.task_key, redactor) if incident.primary_task else "n/a"
     job = _field(incident.job_name, redactor)
     summary = _field((cls.pattern or "unknown error")[:80], redactor)

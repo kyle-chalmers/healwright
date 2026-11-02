@@ -1,4 +1,6 @@
 import datetime as dt
+import os
+import re
 
 import healwright_core as hw
 from conftest import make_incident, make_success
@@ -320,6 +322,23 @@ def test_platform_controlled_fields_are_redacted_and_neutralised(cfg, store, clo
     assert "someone@example.com" not in text and "someone@example.com" not in issue["title"] and "someone@example.com" not in issue["body"]
     assert "`x`" not in issue["body"] and "<script>" not in issue["body"]
 
+
+
+def test_long_notebook_path_reaches_the_fix_workflow_intact(cfg, store, clock):
+    # Redacted as one string, an ordinary long path is a single high-entropy token: the issue said
+    # [REDACTED:high_entropy] and fix.yml's gate could not derive the job folder from it.
+    nb = "jobs/Daily_Sales_Rollup/01_extract_Orders"
+    assert hw.redact(nb) != nb  # the trap this guards against
+    h, rec = build(cfg, store, clock)
+    h.handle(make_incident(notebook=nb, end=clock()))
+    body = issue_posts(rec)[0]["body"]["body"]
+    fix_yml = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".github", "workflows", "fix.yml")
+    with open(fix_yml, encoding="utf-8") as fh:
+        gate_rx = re.search(r'm = re\.search\(r"(.+?)", body\)', fh.read()).group(1)
+    assert re.search(gate_rx, body).group(1) == nb
+    # every segment is still redacted on its own
+    secretish = "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"
+    assert hw._path_field(f"/Users/someone@example.com/{secretish}/nb", hw.redact) == "/Users/[REDACTED:email]/[REDACTED:high_entropy]/nb"
 
 class _Obj:
     def __init__(self, **kw):
