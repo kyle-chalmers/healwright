@@ -143,6 +143,17 @@ def test_every_job_sets_up_python_for_self_hosted_runners():
         assert any(u.startswith("actions/setup-python@") for u in uses), job
 
 
+
+def test_every_job_checks_out_the_base_branch():
+    # The caller fires on an `issues` event, whose default checkout is the repo's default branch. With
+    # base_branch set to anything else, the model read one branch and publish applied its patch to another.
+    _, wf = job_steps("gate")
+    for job in ("gate", "investigate", "publish"):
+        checkouts = [s for s in wf["jobs"][job]["steps"] if s.get("uses", "").startswith("actions/checkout@")]
+        assert checkouts, job
+        for s in checkouts:
+            assert s["with"]["ref"] == "${{ inputs.base_branch }}", job
+
 def test_caller_example_is_short_and_points_at_the_reusable_workflow():
     wf = load(CALLER)
     job = wf["jobs"]["fix"]

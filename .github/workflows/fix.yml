@@ -181,10 +181,11 @@ jobs:
       ALLOWED_FOLDER: ${{ needs.gate.outputs.allowed_folder }}
       NOTEBOOK_PATH: ${{ needs.gate.outputs.notebook_path }}
     steps:
-      # `runner.temp` is not available in job-level env, so the scratch dir is set here (before the AI).
+      # Same ref as `gate` and `publish`: the model must read the code the patch will be applied to.
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: ${{ inputs.base_branch }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
