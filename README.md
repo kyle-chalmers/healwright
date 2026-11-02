@@ -189,6 +189,12 @@ cancel; whether a Run Job task mirrors its child's result; whether the opt-in pr
 restores `FAILED`; Delta state backend under two concurrent writers. Run shadow mode beside any
 existing monitor before trusting it.
 
+The fix pipeline has run end to end on GitHub (2026-11-02, private sandbox, `fix.yml@v1`):
+a draft PR for a one-line bug, a `needs-human` comment when no fix was possible, a refused
+out-of-folder edit, and two quick label events queued instead of racing. Still open: the healer's
+follow-up after the workflow, and `publish`'s path check against a real out-of-scope patch (the
+model never produced one). Details are in checklist items 20 to 24.
+
 Hand-off and open verification items: `docs/status.md`.
 
 Backlog: webhook relay code (documented in `docs/triggers.md`), Snowflake state backend, Airflow

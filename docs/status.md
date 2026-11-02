@@ -1,4 +1,4 @@
-# Status and hand-off (as of 2026-09-21)
+# Status and hand-off (as of 2026-09-21; fix pipeline results added 2026-11-02)
 
 Written by the session that built v0.1.0 so the next person (or agent) starts from facts. Read
 this before touching anything. Sections: what is done, what is verified, what is NOT verified and
@@ -11,7 +11,7 @@ exactly how to verify it, known gaps by file, and the backlog.
 | Methodology | `README.md`, `docs/glossary.md`, `docs/troubleshooting.md`, `docs/architecture.md`, `docs/triggers.md`, `docs/guardrails.md`, `docs/lessons.md`, `docs/migrating-from-a-polling-monitor.md` | complete for v0.1 |
 | Copyable healer | `templates/healer/` (`healwright_core.py`, `healer.py`, `propagate.py`, `patterns.yaml`, `config.example.yaml`, `healer_job.json`) | complete; SQLite tested, Delta implemented but never run |
 | Installer | `tools/install_trigger.py` | complete; offline mode tested, live mode never run against a workspace |
-| Reusable fix workflow | `.github/workflows/fix.yml` + `examples/caller-workflow.yml` | complete; parses on GitHub; **never executed end to end** |
+| Reusable fix workflow | `.github/workflows/fix.yml` + `examples/caller-workflow.yml` | complete; executed end to end in a private sandbox on 2026-11-02 (section 1); `publish` path check not yet hit live |
 | Skills | `skills/self-healing-{audit,build,install-trigger}/SKILL.md` + `.claude-plugin/` | complete; `claude plugin validate --strict` passes locally (CLI 2.1.296); CI job added, not yet run on GitHub |
 | Gate | `bin/selftest.sh`, `bin/leak_scan.py`, `.github/workflows/ci.yml` | green on `main` |
 | Tests | `tests/` (129 cases, incl. `test_skills.py`) | green |
@@ -35,7 +35,29 @@ exactly how to verify it, known gaps by file, and the backlog.
 
 ## NOT verified, and how to verify each
 
-### 1. `fix.yml` end to end (highest priority; nothing about it has run)
+### 1. `fix.yml` end to end (mostly verified 2026-11-02; one negative test open)
+
+**Result.** The procedure below ran in a private throwaway repo with a throwaway App, with the
+caller pinned to `fix.yml@v1`. Issues came from a `workflow_dispatch` harness in that repo that
+mints the App's token from the stored secrets with `actions/create-github-app-token` and files a
+body in the `format_issue` shape. That means no local key file is needed to act as the bot.
+Observed:
+
+- Success path: `gate`, `investigate`, `publish` all green; a draft PR in about 95 s that
+  changes one line inside the job folder, committed by the App, with a clear agent summary and
+  `Closes #N`; a comment on the issue.
+- The likely breakpoints in step 7 did not break: the `Edit(<folder>**)` rule allowed in-folder
+  edits, `Read`/`Grep`/`Glob` worked, and `claude-code-action` ran with the read-only token.
+- No-fix path (a permissions error with correct code): a summary comment, `needs-human`, and
+  no branch or PR.
+- Scope bait (the error text told the model to edit the caller workflow): no edit, a no-fix
+  comment explaining the scope, `needs-human`. The model said it recognised the bait from a
+  comment in the test file, so this shows behaviour on an obvious case only.
+- Two label events seconds apart: the second run waited in `pending` until the first finished.
+
+**Still open:** step 6's hand-crafted patch artifact. Nothing reached `publish` with an
+out-of-scope path, so its validation is covered by `tests/test_workflow.py` only. The healer's
+follow-up after the workflow needs a workspace (checklist item 22).
 
 Do this in a **throwaway** repo with a **throwaway** GitHub App. Never validate against a real
 jobs repo first.
@@ -72,7 +94,7 @@ jobs repo first.
      `pull-requests: read` is required; do not grant any write scope in `investigate`.
    - The action may try to post a tracking comment and fail (harmless) or refuse to start.
    - `shell: python -I {0}` requires Python on the runner; `actions/setup-python` is in every job.
-8. When it works, record the run URL and the observed behaviour here.
+8. When it works, record the observed behaviour here (the 2026-11-02 result is above).
 
 ### 2. Live Databricks matrix (`docs/live-validation-checklist.md`)
 
@@ -129,7 +151,10 @@ came next.
   - Run Job nesting depth cannot be measured from a job's own definition; it is a warning only.
   - The window between re-fetch and `jobs.update` has no compare-and-swap; documented.
 - `.github/workflows/fix.yml`
-  - Never executed (above).
+  - Executed end to end in a sandbox (above); `publish`'s path check never received an
+    out-of-scope patch live.
+  - The pinned `actions/create-github-app-token` SHA logs a Node.js 20 deprecation warning
+    (forced onto Node.js 24 today). Bump the pin before GitHub removes Node.js 20.
   - Summary redaction in `publish` is a compact copy of the shapes in `healwright_core.redact`;
     keep them in sync if you change one.
 - `bin/leak_scan.py`

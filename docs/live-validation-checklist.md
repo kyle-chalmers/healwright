@@ -84,13 +84,19 @@ When stage B is done, uninstall the trigger from the test jobs and delete the re
 
 ## Fix pipeline (stage B)
 
+The maintainer's results below come from a GitHub-only sandbox on 2026-11-02: a private
+throwaway repo, a throwaway App installed on that repo only, and the caller pinned to `fix.yml@v1`.
+No healer was involved. A `workflow_dispatch` harness minted the App's token from the repo secrets
+and filed issues in the exact `format_issue` shape, so the healer-side follow-up in item 22 is
+still open. Record your own results here; these show that the workflow runs, not that your setup does.
+
 | # | Check | How | Expected | Result |
 |---|---|---|---|---|
-| 20 | Issue by the healer bot with the label triggers the caller workflow | fail the test job with a CODE_BUG | `fix.yml` runs once | |
-| 21 | AI step cannot push | try to make the test fix include a workflow file change | run fails on scope; edits discarded; comment + `needs-human` | |
-| 22 | Success path | one-line bug in the test notebook | draft PR opened, comment on the issue, follow-up posted by the healer | |
-| 23 | No-fix path | make the bug unfixable from the folder | comment with the summary + `needs-human`, no PR | |
-| 24 | Two label events within seconds | remove and re-add the label quickly | second run waits for the first (concurrency group) | |
+| 20 | Issue by the healer bot with the label triggers the caller workflow | fail the test job with a CODE_BUG | `fix.yml` runs once | Sandbox: pass. Every issue filed as the App, with the label, started exactly one run. |
+| 21 | AI step cannot push | try to make the test fix include a workflow file change | run fails on scope; edits discarded; comment + `needs-human` | Sandbox: pass, but only the first safeguard was tested. The error text told the model to edit the caller workflow; it made no edit, explained why in the no-fix comment, and `needs-human` was added. The `Edit(<folder>**)` tool rule stopped it, so `publish`'s path check never saw an out-of-scope patch. That check is still tested offline only. |
+| 22 | Success path | one-line bug in the test notebook | draft PR opened, comment on the issue, follow-up posted by the healer | Sandbox: draft PR and comment pass (about 95 s from label to PR; one changed line, only inside the job folder; commit authored by the App). The healer follow-up was not tested. |
+| 23 | No-fix path | make the bug unfixable from the folder | comment with the summary + `needs-human`, no PR | Sandbox: pass. A permissions error with correct code gave a no-fix comment with the right root cause, `needs-human`, and no branch or PR. |
+| 24 | Two label events within seconds | remove and re-add the label quickly | second run waits for the first (concurrency group) | Sandbox: pass. The second run stayed `pending` and its gate started 3 s after the first run finished. The two runs never overlapped, and each left one comment. |
 
 ## Sign-off (stage C)
 
