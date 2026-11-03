@@ -195,7 +195,7 @@ jobs:
       # model poisoned the environment, those steps still cannot write anything on GitHub.
       - name: Mint read-only App token for the AI step
         id: ro-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.app_id }}
           private-key: ${{ secrets.app_private_key }}
@@ -454,7 +454,7 @@ jobs:
       - name: Mint write-scoped App token for the trusted steps
         id: rw-token
         if: always()
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           app-id: ${{ secrets.app_id }}
           private-key: ${{ secrets.app_private_key }}
