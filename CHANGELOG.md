@@ -59,6 +59,11 @@ First public cut of the methodology and reference kit.
   `publish`'s path check against a real out-of-scope patch). Pain: the docs said the fix workflow
   had never run, so an adopter could not tell whether it worked at all, or which guarantees
   rested only on offline tests.
+- **`create-github-app-token` bumped to v3.3.0** in `fix.yml` (Node.js 24), checked with one
+  live sandbox run. Pain: the v2 pin logged a Node.js 20 deprecation warning on every run, and
+  `fix.yml` would have broken once GitHub removed Node.js 20 from its runners. `app-id` still
+  works in v3 but is deprecated; the move to `client-id` is deferred because it changes what
+  adopters store as a secret.
 
 Reviewed before release by two independent read-only passes (a Codex code review and a separate
 organisation-leak audit); the P0/P1 findings are folded in: the leaf trigger now builds incidents

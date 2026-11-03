@@ -1,4 +1,4 @@
-# Status and hand-off (as of 2026-09-21; fix pipeline results added 2026-11-02)
+# Status and hand-off (as of 2026-09-21; fix pipeline results added 2026-11-02, action bump 2026-11-03)
 
 Written by the session that built v0.1.0 so the next person (or agent) starts from facts. Read
 this before touching anything. Sections: what is done, what is verified, what is NOT verified and
@@ -153,8 +153,11 @@ came next.
 - `.github/workflows/fix.yml`
   - Executed end to end in a sandbox (above); `publish`'s path check never received an
     out-of-scope patch live.
-  - The pinned `actions/create-github-app-token` SHA logs a Node.js 20 deprecation warning
-    (forced onto Node.js 24 today). Bump the pin before GitHub removes Node.js 20.
+  - `actions/create-github-app-token` is pinned to v3.3.0 (Node.js 24). A sandbox run on
+    2026-11-03 passed all three jobs with no Node.js 20 warning. v3 deprecates the `app-id`
+    input in favour of `client-id`, so every mint logs a warning. Switching means callers store
+    the App's client ID instead of its numeric ID, a breaking change for adopters, so it waits
+    for a release that can carry it.
   - Summary redaction in `publish` is a compact copy of the shapes in `healwright_core.redact`;
     keep them in sync if you change one.
 - `bin/leak_scan.py`
